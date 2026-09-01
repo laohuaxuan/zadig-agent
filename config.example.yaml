@@ -1,0 +1,8 @@
+openrouter:
+  api_key: "YOUR_OPENROUTER_API_KEY"
+  model: "minimax/minimax-m2.7:free"
+  base_url: "https://openrouter.ai/api/v1"
+
+zadig:
+  base_url: "https://your.zadig.com"
+  api_token: "YOUR_ZADIG_API_TOKEN"
