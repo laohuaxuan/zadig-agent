@@ -46,7 +46,7 @@ _NOTIFY_TYPES = {
 _VIEW_TYPES = {"custom"}
 _TICKET_STATUS = {0, 1}
 _WORKFLOW_TEMPLATE_PATH = (
-    Path(__file__).resolve().parents[1] / "templates" / "workflow_build_deploy.json"
+    Path(__file__).resolve().parents[1] / "skills" / "workflow_build_deploy.json"
 )
 
 

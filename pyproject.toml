@@ -1,7 +1,7 @@
 [project]
 name = "zadig-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "Zadig OpenAPI MCP server and LangGraph agent"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -19,5 +19,8 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.scripts]
+zadig-mcp = "zadig_mcp.server:main"
+
 [tool.hatch.build.targets.wheel]
-packages = ["agent", "tools", "model", "utils"]
+packages = ["agent", "tools", "model", "utils", "zadig_mcp"]

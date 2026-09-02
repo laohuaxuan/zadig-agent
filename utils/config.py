@@ -45,6 +45,23 @@ def openrouter_config() -> dict:
     return {"api_key": api_key, "model": model, "base_url": base_url}
 
 
+def mcp_server_config() -> dict:
+    """读取可选的 MCP 服务配置；缺省为本地 stdio。"""
+    raw = load_config().get("mcp") or {}
+    if not isinstance(raw, dict):
+        raise ValueError("config.yaml 中 mcp 必须是映射")
+    transport = str(raw.get("transport") or "stdio").strip().lower()
+    if transport not in {"stdio", "sse"}:
+        raise ValueError("mcp.transport 必须是 stdio 或 sse")
+    host = str(raw.get("host") or "127.0.0.1").strip() or "127.0.0.1"
+    try:
+        port = int(raw.get("port") or 8000)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("mcp.port 必须是整数") from exc
+    token = str(raw.get("token") or "").strip()
+    return {"transport": transport, "host": host, "port": port, "token": token}
+
+
 def zadig_config() -> dict:
     cfg = load_config().get("zadig") or {}
     if not isinstance(cfg, dict):

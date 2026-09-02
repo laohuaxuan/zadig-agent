@@ -15,18 +15,7 @@ if str(_ROOT) not in sys.path:
 from model.openrouter import get_openrouter_llm
 from tools.file_saver import FileSaver
 from tools.file_tools import file_tools
-from tools.build import get_stdio_tools as get_build_stdio_tools
-from tools.cluster import get_stdio_tools as get_cluster_stdio_tools
-from tools.collaboration import get_stdio_tools as get_collaboration_stdio_tools
-from tools.environment import get_stdio_tools as get_environment_stdio_tools
-from tools.policy import get_stdio_tools as get_policy_stdio_tools
-from tools.project import get_stdio_tools as get_project_stdio_tools
-from tools.registry import get_stdio_tools as get_registry_stdio_tools
-from tools.services import get_stdio_tools as get_services_stdio_tools
-from tools.system import get_stdio_tools as get_system_stdio_tools
-from tools.templates import get_stdio_tools as get_templates_stdio_tools
-from tools.users import get_stdio_tools as get_users_stdio_tools
-from tools.workflows import get_stdio_tools as get_workflows_stdio_tools
+from tools.zadig import get_stdio_tools as get_zadig_stdio_tools
 
 def format_debug_output(step_name: str, content: str, is_tool_call: bool = False) -> None:
     if is_tool_call:
@@ -42,33 +31,10 @@ def format_debug_output(step_name: str, content: str, is_tool_call: bool = False
 
 async def run_agent():
     memory = FileSaver()
-    # tools
-    project_tools = await get_project_stdio_tools()
-    environment_tools = await get_environment_stdio_tools()
-    services_tools = await get_services_stdio_tools()
-    build_tools = await get_build_stdio_tools()
-    workflows_tools = await get_workflows_stdio_tools()
-    cluster_tools = await get_cluster_stdio_tools()
-    registry_tools = await get_registry_stdio_tools()
-    templates_tools = await get_templates_stdio_tools()
-    policy_tools = await get_policy_stdio_tools()
-    users_tools = await get_users_stdio_tools()
-    system_tools = await get_system_stdio_tools()
-    collaboration_tools = await get_collaboration_stdio_tools()
+    zadig_tools = await get_zadig_stdio_tools()
     tools = [
         *file_tools,
-        *project_tools,
-        *environment_tools,
-        *services_tools,
-        *build_tools,
-        *workflows_tools,
-        *cluster_tools,
-        *registry_tools,
-        *templates_tools,
-        *policy_tools,
-        *users_tools,
-        *system_tools,
-        *collaboration_tools,
+        *zadig_tools,
     ]
 
     prompt = PromptTemplate.from_template("""

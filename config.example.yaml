@@ -6,3 +6,10 @@ openrouter:
 zadig:
   base_url: "https://your.zadig.com"
   api_token: "YOUR_ZADIG_API_TOKEN"
+
+# 可选。不写则默认本地 stdio。公网 SSE 必须填写 token。
+mcp:
+  transport: "stdio"
+  host: "127.0.0.1"
+  port: 8000
+  token: ""
