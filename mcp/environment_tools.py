@@ -21,6 +21,7 @@ _SCALE_TYPES = {"Deployment", "StatefulSet"}
 _ENVCFG_TYPES = {"ConfigMap", "Ingress", "Secret", "PVC"}
 _SHARE_OPS = {"enable", "disable"}
 _IMAGE_KINDS = {"deployment", "statefulset", "cronjob"}
+_HELM_DEPLOY_STRATEGIES = {"import", "deploy"}
 
 
 def _require(name: str, value: Any) -> str:
@@ -43,6 +44,68 @@ def _envcfg_type(value: str) -> str:
     if cfg_type not in _ENVCFG_TYPES:
         raise ValueError("type 必须是 ConfigMap、Ingress、Secret 或 PVC")
     return cfg_type
+
+
+def _normalize_override_kvs(items: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if not items:
+        return []
+    if not isinstance(items, list):
+        raise ValueError("override_kvs 必须是对象数组")
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("override_kvs 中的每一项必须是对象")
+        key = _require("override_kvs.key", item.get("key"))
+        if "value" not in item:
+            raise ValueError(f"override_kvs 中 {key} 缺少 value")
+        out.append({"key": key, "value": item.get("value")})
+    return out
+
+
+def _normalize_import_values_from_git(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not value:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("import_values_from_git 必须是对象")
+    row: dict[str, Any] = {
+        "codehost_name": _require("import_values_from_git.codehost_name", value.get("codehost_name")),
+        "namespace": _require("import_values_from_git.namespace", value.get("namespace")),
+        "repo": _require("import_values_from_git.repo", value.get("repo")),
+        "branch": _require("import_values_from_git.branch", value.get("branch")),
+        "value_path": _require("import_values_from_git.value_path", value.get("value_path")),
+    }
+    if value.get("auto_sync") is not None:
+        row["auto_sync"] = bool(value.get("auto_sync"))
+    return row
+
+
+def _normalize_helm_env_services(services: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not services:
+        raise ValueError("services 不能为空")
+    if not isinstance(services, list):
+        raise ValueError("services 必须是对象数组")
+    out: list[dict[str, Any]] = []
+    for item in services:
+        if not isinstance(item, dict):
+            raise ValueError("services 中的每一项必须是对象")
+        strategy = _require("deploy_strategy", item.get("deploy_strategy")).lower()
+        if strategy not in _HELM_DEPLOY_STRATEGIES:
+            raise ValueError("deploy_strategy 必须是 import 或 deploy")
+        row: dict[str, Any] = {
+            "service_name": _require("service_name", item.get("service_name")),
+            "deploy_strategy": strategy,
+        }
+        values_yaml = str(item.get("values_yaml") or "")
+        if values_yaml.strip():
+            row["values_yaml"] = values_yaml
+        override_kvs = _normalize_override_kvs(item.get("override_kvs"))
+        if override_kvs:
+            row["override_kvs"] = override_kvs
+        imported = _normalize_import_values_from_git(item.get("import_values_from_git"))
+        if imported:
+            row["import_values_from_git"] = imported
+        out.append(row)
+    return out
 
 
 @mcp.tool(name="list_environments", description="查看项目下的环境列表（测试或生产）。")
@@ -315,24 +378,57 @@ def add_yaml_services(
         return _error(str(exc))
 
 
-@mcp.tool(name="add_helm_services", description="向 Helm 环境添加服务。")
+@mcp.tool(
+    name="add_helm_services",
+    description="向 Helm 环境添加服务。可用 values_yaml、override_kvs，或从代码仓导入 values 覆盖 Chart 默认值。",
+)
 def add_helm_services(
     project_key: Annotated[str, Field(description="项目标识", example="my-project")],
     env_name: Annotated[str, Field(description="环境标识", example="dev")],
-    services: Annotated[list[dict[str, Any]], Field(description="Helm 服务列表，每项需含 service_name、deploy_strategy")],
+    services: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description=(
+                "Helm 服务列表。每项需 service_name、deploy_strategy（import/deploy）；"
+                "可选 values_yaml、override_kvs（[{key, value}]）、"
+                "import_values_from_git（codehost_name、namespace、repo、branch、value_path，可选 auto_sync）"
+            ),
+            example=[
+                {
+                    "service_name": "service1",
+                    "deploy_strategy": "deploy",
+                    "import_values_from_git": {
+                        "codehost_name": "gitlab",
+                        "namespace": "kr-test-org1",
+                        "repo": "multi-service-demo",
+                        "branch": "main",
+                        "value_path": "var.yaml",
+                        "auto_sync": True,
+                    },
+                    "override_kvs": [{"key": "a", "value": "b"}],
+                }
+            ],
+        ),
+    ],
     production: Annotated[bool, Field(description="是否为生产环境", example=False)] = False,
 ) -> Annotated[str, Field(description="添加结果")]:
-    """对应 POST /openapi/environments/helm/<环境>/services。"""
+    """对应 POST /openapi/environments/helm/<环境>/services。
+
+    import_values_from_git 从已接入代码源拉取 values 文件，覆盖 Chart 默认值。
+    可与 values_yaml、override_kvs 同时使用。
+    """
     try:
         env = _require("env_name", env_name)
-        if not services:
-            raise ValueError("services 不能为空")
         return _dump(
             zadig_request(
                 "POST",
                 f"/openapi/environments/helm/{_enc(env)}/services",
                 params={"projectKey": _require("project_key", project_key)},
-                json_data={"env_name": env, "production": production, "services": services},
+                json_data={
+                    "env_name": env,
+                    "production": production,
+                    "services": _normalize_helm_env_services(services),
+                },
             )
         )
     except Exception as exc:

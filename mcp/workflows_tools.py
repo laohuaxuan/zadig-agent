@@ -8,6 +8,9 @@
 
 from __future__ import annotations
 
+import copy
+import json
+from pathlib import Path
 from typing import Any, Annotated
 from urllib.parse import quote
 
@@ -42,6 +45,9 @@ _NOTIFY_TYPES = {
 }
 _VIEW_TYPES = {"custom"}
 _TICKET_STATUS = {0, 1}
+_WORKFLOW_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[1] / "templates" / "workflow_build_deploy.json"
+)
 
 
 def _require(name: str, value: Any) -> str:
@@ -192,6 +198,61 @@ def _normalize_stages(items: list[dict[str, Any]] | None) -> list[dict[str, Any]
             row["approval"] = _as_dict(item.get("approval"), "stages.approval")
         out.append(row)
     return out
+
+
+def _fill_placeholders(value: Any, mapping: dict[str, str]) -> Any:
+    if isinstance(value, str):
+        for key, replacement in mapping.items():
+            value = value.replace("{" + key + "}", replacement)
+        return value
+    if isinstance(value, list):
+        return [_fill_placeholders(item, mapping) for item in value]
+    if isinstance(value, dict):
+        return {key: _fill_placeholders(item, mapping) for key, item in value.items()}
+    return value
+
+
+def _load_workflow_template() -> dict[str, Any]:
+    if not _WORKFLOW_TEMPLATE_PATH.exists():
+        raise FileNotFoundError(f"缺少工作流模板 {_WORKFLOW_TEMPLATE_PATH}")
+    with _WORKFLOW_TEMPLATE_PATH.open(encoding="utf-8") as fh:
+        data = json.load(fh)
+    if not isinstance(data, dict):
+        raise ValueError("工作流模板必须是 JSON 对象")
+    return data
+
+
+def _workflow_from_template(
+    *,
+    project: str,
+    workflow_name: str,
+    display_name: str,
+    registry_id: str,
+    service_name: str,
+    build_name: str,
+    image_name: str,
+    env_name: str,
+    concurrency_limit: int,
+    description: str = "",
+) -> dict[str, Any]:
+    payload = _fill_placeholders(
+        copy.deepcopy(_load_workflow_template()),
+        {
+            "workflow_name": workflow_name,
+            "registry_id": registry_id,
+            "service_name": service_name,
+            "build_name": build_name,
+            "image_name": image_name,
+            "env_name": env_name,
+        },
+    )
+    payload["name"] = workflow_name
+    payload["display_name"] = display_name
+    payload["project"] = project
+    payload["concurrency_limit"] = int(concurrency_limit)
+    if description.strip():
+        payload["description"] = description.strip()
+    return payload
 
 
 def _workflow_definition(
@@ -436,31 +497,37 @@ def approve_workflow_task(
 
 @mcp.tool(
     name="create_workflow",
-    description="创建自定义工作流。stages 结构复杂，建议先在页面配置后导出 YAML 再转成 JSON 传入。",
+    description="按内置构建+部署模板创建工作流，绑定镜像仓库、服务、构建配置和部署环境。",
 )
 def create_workflow(
     project: Annotated[str, Field(description="项目标识", example="demo")],
-    name: Annotated[str, Field(description="工作流标识", example="workflow-demo")],
-    display_name: Annotated[str, Field(description="工作流名称", example="workflow-demo")],
-    concurrency_limit: Annotated[int, Field(description="任务并发数，-1 无限制，0 不可执行", example=5)],
+    name: Annotated[str, Field(description="工作流标识", example="demo-build-deploy")],
+    registry_id: Annotated[str, Field(description="镜像仓库 ID", example="630c7ad700430c131062e245")],
+    service_name: Annotated[str, Field(description="服务名称，同时作为服务组件名", example="myservice")],
+    build_name: Annotated[str, Field(description="构建名称", example="myservice-build")],
+    image_name: Annotated[str, Field(description="镜像名称", example="myservice")],
+    display_name: Annotated[str, Field(description="工作流显示名称，默认与标识相同", example="")] = "",
+    env_name: Annotated[str, Field(description="部署环境标识", example="dev")] = "dev",
+    concurrency_limit: Annotated[int, Field(description="任务并发数，-1 无限制，0 不可执行", example=1)] = 1,
     description: Annotated[str, Field(description="工作流描述", example="")] = "",
-    stages: Annotated[
-        list[dict[str, Any]],
-        Field(
-            description="阶段配置，每项含 name、parallel、jobs；jobs 为任务数组，可选 approval",
-            example=[{"name": "构建", "parallel": True, "jobs": [{"name": "build", "type": "zadig-build", "spec": {}}]}],
-        ),
-    ] = [],
 ) -> Annotated[str, Field(description="创建结果")]:
-    """对应 POST /api/aslan/workflow/v4。"""
+    """对应 POST /api/aslan/workflow/v4。
+
+    使用 templates/workflow_build_deploy.json：构建阶段 zadig-build，部署阶段 zadig-deploy（镜像来自构建任务）。
+    """
     try:
-        payload = _workflow_definition(
-            name=name,
-            display_name=display_name,
-            project=project,
+        workflow_name = _require("name", name)
+        payload = _workflow_from_template(
+            project=_require("project", project),
+            workflow_name=workflow_name,
+            display_name=display_name.strip() or workflow_name,
+            registry_id=_require("registry_id", registry_id),
+            service_name=_require("service_name", service_name),
+            build_name=_require("build_name", build_name),
+            image_name=_require("image_name", image_name),
+            env_name=_require("env_name", env_name),
             concurrency_limit=concurrency_limit,
             description=description,
-            stages=stages,
         )
         return _dump(zadig_request("POST", "/api/aslan/workflow/v4", json_data=payload))
     except Exception as exc:
