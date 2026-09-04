@@ -16,11 +16,13 @@ pip install -e .
 cp config.example.yaml config.yaml
 ```
 
-编辑 `config.yaml`：
+`config.yaml` 只放基础设施：
 
-- `zadig.base_url` / `zadig.api_token`：Zadig 地址和 API Token（必填）
-- `openrouter.*`：仅本地 LangGraph Agent 需要
+- `mysql.*`：页面配置（Agent / Zadig / 新建技能）写入该数据库
+- `server.*`：系统设置页 API 监听地址，默认 `127.0.0.1:8088`
 - `mcp.*`：可选。不写则默认 `stdio` + `127.0.0.1:8000`
+
+Agent、Zadig 连接和页面新建的技能在系统设置页维护，保存在 MySQL。
 
 不要把 `config.yaml` 提交到仓库。
 
@@ -148,9 +150,33 @@ stdio 不能被外网访问。流程：本机 SSE → HTTPS 反代或隧道 → 
 
 这些工具能改 Zadig 项目、环境和流水线。公网必须 HTTPS + Bearer Token，不要把 Token 或 `config.yaml` 写进仓库。
 
+## 系统设置页（React）
+
+从 Zadig 同步代码源、集群、镜像仓库和用户，布局对照系统集成页。
+
+```bash
+# 后端 API，监听地址读 config.yaml 的 server，默认 http://127.0.0.1:8088
+.venv/bin/python -m webapi
+
+# 前端，默认 http://127.0.0.1:5173
+cd web && npm install && npm run dev
+```
+
+浏览器打开 `http://127.0.0.1:5173`。
+
+- 系统设置 → 系统集成：从 Zadig 同步代码源、集群、镜像仓库、用户
+- 技能 → Skills：仓库示例 + 页面新建（写入 MySQL）
+- 技能 → MCP：内置工具 + 页面新建的 MCP 技能（写入 MySQL）
+- Agent 管理：在页面配置多个模型（api_key / model / base_url），设置默认项；默认不可用时随机切到其他可连通备份
+- Zadig 管理：在页面配置 base_url、api_token，并查看连通状态
+
+所有列表支持分页，并可选择每页 10 / 20 / 50 / 100 条。
+
+页面配置写入 MySQL；`config.yaml` 不要提交到仓库。
+
 ## 本地 LangGraph Agent
 
-读 `config.yaml` 里的 OpenRouter 和 Zadig，通过 stdio 拉起同一套 MCP 工具：
+读页面维护的 Agent / Zadig 配置，通过 stdio 拉起同一套 MCP 工具：
 
 ```bash
 .venv/bin/python agent/zadig_agent.py

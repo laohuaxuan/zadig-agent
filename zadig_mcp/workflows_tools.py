@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
 from typing import Any, Annotated
 from urllib.parse import quote
 
@@ -45,9 +44,7 @@ _NOTIFY_TYPES = {
 }
 _VIEW_TYPES = {"custom"}
 _TICKET_STATUS = {0, 1}
-_WORKFLOW_TEMPLATE_PATH = (
-    Path(__file__).resolve().parents[1] / "skills" / "workflow_build_deploy.json"
-)
+_DEFAULT_WORKFLOW_TEMPLATE = "workflow_build_deploy"
 
 
 def _require(name: str, value: Any) -> str:
@@ -212,14 +209,29 @@ def _fill_placeholders(value: Any, mapping: dict[str, str]) -> Any:
     return value
 
 
-def _load_workflow_template() -> dict[str, Any]:
-    if not _WORKFLOW_TEMPLATE_PATH.exists():
-        raise FileNotFoundError(f"缺少工作流模板 {_WORKFLOW_TEMPLATE_PATH}")
-    with _WORKFLOW_TEMPLATE_PATH.open(encoding="utf-8") as fh:
-        data = json.load(fh)
-    if not isinstance(data, dict):
-        raise ValueError("工作流模板必须是 JSON 对象")
-    return data
+def _load_workflow_template(template_name: str = _DEFAULT_WORKFLOW_TEMPLATE) -> dict[str, Any]:
+    from utils.template_store import load_template_body
+
+    try:
+        from webapi.templates_catalog import get_template_body
+
+        return get_template_body(template_name)
+    except Exception:
+        return load_template_body(template_name)
+
+
+def _set_deploy_production(payload: dict[str, Any], production: bool) -> None:
+    for stage in payload.get("stages") or []:
+        if not isinstance(stage, dict):
+            continue
+        for job in stage.get("jobs") or []:
+            if not isinstance(job, dict):
+                continue
+            if job.get("type") != "zadig-deploy":
+                continue
+            spec = job.get("spec")
+            if isinstance(spec, dict):
+                spec["production"] = bool(production)
 
 
 def _workflow_from_template(
@@ -234,9 +246,11 @@ def _workflow_from_template(
     env_name: str,
     concurrency_limit: int,
     description: str = "",
+    template_name: str = _DEFAULT_WORKFLOW_TEMPLATE,
+    production: bool = False,
 ) -> dict[str, Any]:
     payload = _fill_placeholders(
-        copy.deepcopy(_load_workflow_template()),
+        copy.deepcopy(_load_workflow_template(template_name)),
         {
             "workflow_name": workflow_name,
             "registry_id": registry_id,
@@ -250,6 +264,7 @@ def _workflow_from_template(
     payload["display_name"] = display_name
     payload["project"] = project
     payload["concurrency_limit"] = int(concurrency_limit)
+    _set_deploy_production(payload, production)
     if description.strip():
         payload["description"] = description.strip()
     return payload
@@ -510,6 +525,14 @@ def create_workflow(
     env_name: Annotated[str, Field(description="部署环境标识", example="dev")] = "dev",
     concurrency_limit: Annotated[int, Field(description="任务并发数，-1 无限制，0 不可执行", example=1)] = 1,
     description: Annotated[str, Field(description="工作流描述", example="")] = "",
+    template_name: Annotated[
+        str,
+        Field(description="Agent 模板标识，默认 workflow_build_deploy", example="workflow_build_deploy"),
+    ] = _DEFAULT_WORKFLOW_TEMPLATE,
+    production: Annotated[
+        bool,
+        Field(description="是否部署到生产环境，false 为测试环境", example=False),
+    ] = False,
 ) -> Annotated[str, Field(description="创建结果")]:
     """对应 POST /api/aslan/workflow/v4。
 
@@ -528,6 +551,8 @@ def create_workflow(
             env_name=_require("env_name", env_name),
             concurrency_limit=concurrency_limit,
             description=description,
+            template_name=template_name.strip() or _DEFAULT_WORKFLOW_TEMPLATE,
+            production=production,
         )
         return _dump(zadig_request("POST", "/api/aslan/workflow/v4", json_data=payload))
     except Exception as exc:

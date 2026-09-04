@@ -1,0 +1,135 @@
+{
+  "name": "workflow_build_deploy",
+  "display_name": "构建部署工作流",
+  "description": "包含构建与部署两个阶段的 Zadig 自定义工作流，支持 {workflow_name}、{registry_id} 等占位符。",
+  "category": "workflow",
+  "body": {
+    "name": "{workflow_name}",
+    "display_name": "{workflow_name}",
+    "disabled": false,
+    "category": "",
+    "params": [],
+    "stages": [
+      {
+        "name": "构建",
+        "parallel": true,
+        "approval": null,
+        "manual_exec": null,
+        "jobs": [
+          {
+            "name": "build",
+            "type": "zadig-build",
+            "skipped": false,
+            "spec": {
+              "source": "runtime",
+              "job_name": "",
+              "origin_job_name": "",
+              "ref_repos": false,
+              "docker_registry_id": "{registry_id}",
+              "default_service_and_builds": [
+                {
+                  "service_name": "{service_name}",
+                  "service_module": "{service_name}",
+                  "build_name": "{build_name}",
+                  "image_name": "{image_name}",
+                  "key_vals": [
+                    {
+                      "key": "DOCKER_BUILDKIT",
+                      "value": "0",
+                      "type": "string",
+                      "registry_id": "",
+                      "is_credential": false,
+                      "description": "",
+                      "source": "runtime"
+                    }
+                  ],
+                  "repos": [],
+                  "share_storage_info": null
+                }
+              ],
+              "service_and_builds": [],
+              "service_and_builds_options": [
+                {
+                  "service_name": "{service_name}",
+                  "service_module": "{service_name}",
+                  "build_name": "{build_name}",
+                  "image_name": "{image_name}",
+                  "key_vals": [
+                    {
+                      "key": "DOCKER_BUILDKIT",
+                      "value": "0",
+                      "type": "string",
+                      "registry_id": "",
+                      "is_credential": false,
+                      "description": "",
+                      "source": "runtime"
+                    }
+                  ],
+                  "repos": [],
+                  "share_storage_info": null
+                }
+              ],
+              "service_name": "",
+              "service_module": ""
+            },
+            "run_policy": "",
+            "error_policy": null,
+            "execute_policy": {
+              "type": "",
+              "match_rule": "all",
+              "rules": []
+            },
+            "servicemodules": [],
+            "active": false,
+            "error": false,
+            "status": "edit"
+          }
+        ]
+      },
+      {
+        "name": "部署",
+        "parallel": true,
+        "approval": null,
+        "manual_exec": null,
+        "jobs": [
+          {
+            "name": "deploy",
+            "type": "zadig-deploy",
+            "skipped": false,
+            "spec": {
+              "deploy_contents": ["image", "vars", "config"],
+              "deploy_type": "",
+              "env": "{env_name}",
+              "env_source": "",
+              "job_name": "build",
+              "merge_strategy_source": "runtime",
+              "origin_job_name": "",
+              "production": false,
+              "service_and_images": [],
+              "service_variable_config": [],
+              "services": [],
+              "skip_check_helm_workload_status": false,
+              "skip_check_run_status": false,
+              "source": "fromjob",
+              "value_merge_strategy": "reuse-values",
+              "value_sync_strategy": "manual",
+              "version_name": "",
+              "yaml_merge_strategy": "merge"
+            },
+            "run_policy": "",
+            "error_policy": null,
+            "execute_policy": {
+              "type": "",
+              "match_rule": "all",
+              "rules": []
+            },
+            "servicemodules": [],
+            "active": false,
+            "error": false,
+            "status": "edit"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -99,9 +99,9 @@ def _normalize_services(items: list[dict[str, Any]], name: str = "services") -> 
     return out
 
 
-def _normalize_installs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _normalize_installs(items: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     if not items:
-        raise ValueError("installs 不能为空")
+        return []
     out: list[dict[str, Any]] = []
     for item in _as_list(items, "installs"):
         if not isinstance(item, dict):
@@ -275,7 +275,7 @@ def _build_definition_payload(
     project_key: str,
     infrastructure: str,
     build_os: str,
-    installs: list[dict[str, Any]],
+    installs: list[dict[str, Any]] | None,
     script_type: str,
     build_script: str,
     services: list[dict[str, Any]],
@@ -345,10 +345,6 @@ def create_build(
     name: Annotated[str, Field(description="构建名称", example="api-test")],
     infrastructure: Annotated[str, Field(description="基础设施：kubernetes 或 vm", example="kubernetes")],
     build_os: Annotated[str, Field(description="构建操作系统", example="ubuntu 20.04")],
-    installs: Annotated[
-        list[dict[str, Any]],
-        Field(description="依赖软件包列表，每项含 name、version", example=[{"name": "go", "version": "1.20.7"}]),
-    ],
     script_type: Annotated[str, Field(description="脚本类型：shell、batch_file、powershell", example="shell")],
     build_script: Annotated[str, Field(description="构建脚本内容", example="#!/bin/bash\nset -e\n")],
     services: Annotated[
@@ -358,6 +354,10 @@ def create_build(
             example=[{"service_name": "service1", "service_module": "service1"}],
         ),
     ],
+    installs: Annotated[
+        list[dict[str, Any]],
+        Field(description="依赖软件包列表，每项含 name、version；可选，可传空列表", example=[{"name": "go", "version": "1.20.7"}]),
+    ] = [],
     repo_info: Annotated[
         list[dict[str, Any]],
         Field(
@@ -412,10 +412,6 @@ def update_build(
     name: Annotated[str, Field(description="构建名称", example="api-test")],
     infrastructure: Annotated[str, Field(description="基础设施：kubernetes 或 vm", example="kubernetes")],
     build_os: Annotated[str, Field(description="构建操作系统", example="ubuntu 20.04")],
-    installs: Annotated[
-        list[dict[str, Any]],
-        Field(description="依赖软件包列表，每项含 name、version", example=[{"name": "go", "version": "1.20.7"}]),
-    ],
     script_type: Annotated[str, Field(description="脚本类型：shell、batch_file、powershell", example="shell")],
     build_script: Annotated[str, Field(description="构建脚本内容", example="#!/bin/bash\nset -e\n")],
     services: Annotated[
@@ -425,6 +421,10 @@ def update_build(
             example=[{"service_name": "service1", "service_module": "service1"}],
         ),
     ],
+    installs: Annotated[
+        list[dict[str, Any]],
+        Field(description="依赖软件包列表，每项含 name、version；可选，可传空列表", example=[{"name": "go", "version": "1.20.7"}]),
+    ] = [],
     repo_info: Annotated[
         list[dict[str, Any]],
         Field(

@@ -1,11 +1,17 @@
-openrouter:
-  api_key: "YOUR_OPENROUTER_API_KEY"
-  model: "minimax/minimax-m2.7:free"
-  base_url: "https://openrouter.ai/api/v1"
+# 仅存放基础设施：MySQL、本服务监听地址、可选 MCP 启动参数。
+# Agent / Zadig / 页面创建的技能保存在 MySQL，不写回本文件。
 
-zadig:
-  base_url: "https://your.zadig.com"
-  api_token: "YOUR_ZADIG_API_TOKEN"
+server:
+  host: "127.0.0.1"
+  port: 8088
+
+mysql:
+  host: "127.0.0.1"
+  port: 3306
+  user: "root"
+  password: "YOUR_MYSQL_PASSWORD"
+  database: "zadig_agent"
+  charset: utf8mb4
 
 # 可选。不写则默认本地 stdio。公网 SSE 必须填写 token。
 mcp:
@@ -13,3 +19,24 @@ mcp:
   host: "127.0.0.1"
   port: 8000
   token: ""
+
+# 系统集成：从 Zadig 定期拉取代码源、集群、镜像仓库、服务模板与用户（秒）
+integration:
+  sync_interval_seconds: 300
+
+# 平台登录与审批（参考 mse-domain-binding）
+auth:
+  jwt_secret: "change-me-in-production"
+  token_expiry: "24h"
+  root_initial_name: "admin"
+  root_initial_phone: "13000000000"
+  root_initial_email: "admin@example.com"
+  root_initial_password: "Admin@123456"
+
+feishu:
+  app_base_url: "http://127.0.0.1:5173"
+  app_id: ""
+  app_secret: ""
+  oauth_redirect_uri: ""
+  department_ids:
+    - "0"

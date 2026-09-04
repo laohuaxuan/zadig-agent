@@ -46,6 +46,18 @@ def _normalize_helm_services(service_list: list[dict[str, Any]]) -> list[dict[st
                 for v in variables
                 if isinstance(v, dict) and v.get("key")
             ]
+        import_values = item.get("import_values_from_git")
+        if import_values:
+            if not isinstance(import_values, dict):
+                raise ValueError("import_values_from_git 必须是对象")
+            row["import_values_from_git"] = {
+                "codehost_name": str(import_values.get("codehost_name") or "").strip(),
+                "namespace": str(import_values.get("namespace") or "").strip(),
+                "repo": str(import_values.get("repo") or "").strip(),
+                "branch": str(import_values.get("branch") or "").strip(),
+                "value_path": str(import_values.get("value_path") or "").strip(),
+                "auto_sync": bool(import_values.get("auto_sync", True)),
+            }
         out.append(row)
     return out
 
@@ -67,6 +79,7 @@ def _normalize_helm_envs(env_list: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "env_key": env_key,
                 "cluster_name": cluster_name,
                 "namespace": namespace,
+                **({"production": bool(item["production"])} if "production" in item else {}),
             }
         )
     return out

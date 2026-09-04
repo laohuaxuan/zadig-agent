@@ -13,6 +13,11 @@ dependencies = [
     "pyyaml>=6.0.3",
     "mcp>=1.24.0,<2",
     "langchain-mcp-adapters>=0.3.1",
+    "fastapi>=0.116.0",
+    "uvicorn>=0.31.1",
+    "pymysql>=1.1.1",
+    "pyjwt>=2.10.1",
+    "bcrypt>=4.2.1",
 ]
 
 [build-system]
@@ -21,6 +26,7 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 zadig-mcp = "zadig_mcp.server:main"
+zadig-settings = "webapi.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["agent", "tools", "model", "utils", "zadig_mcp"]
+packages = ["agent", "tools", "model", "utils", "zadig_mcp", "webapi"]
