@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zadig-agent
+  namespace: devops
+  labels:
+    app: zadig-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zadig-agent
+  template:
+    metadata:
+      labels:
+        app: zadig-agent
+    spec:
+      containers:
+        - name: zadig-agent
+          image: your-registry/zadig-agent:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8088
+              name: http
+          env:
+            - name: CONFIG_FILE
+              value: /app/config.yaml
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zadig-agent-secret
+                  key: DB_PASSWORD
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 8
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 2048Mi
+      volumes:
+        - name: app-config
+          configMap:
+            name: zadig-agent-config

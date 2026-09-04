@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: zadig-agent
+  namespace: devops
+  labels:
+    app: zadig-agent
+spec:
+  type: ClusterIP
+  selector:
+    app: zadig-agent
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088
+      protocol: TCP

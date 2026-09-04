@@ -1,9 +1,17 @@
 from pathlib import Path
+import os
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = ROOT / "config.yaml"
+
+
+def config_path() -> Path:
+    env = os.environ.get("CONFIG_FILE", "").strip()
+    return Path(env) if env else ROOT / "config.yaml"
+
+
+CONFIG_PATH = config_path()
 
 _cache: dict | None = None
 _mtime: float | None = None
@@ -12,14 +20,15 @@ _mtime: float | None = None
 def load_config() -> dict:
     """读取 config.yaml；文件 mtime 变化时自动重新加载。"""
     global _cache, _mtime
-    if not CONFIG_PATH.exists():
+    path = config_path()
+    if not path.exists():
         raise FileNotFoundError(
-            f"缺少配置文件 {CONFIG_PATH}，请复制 config.example.yaml 为 config.yaml 后填写 MySQL 和服务地址"
+            f"缺少配置文件 {path}，请复制 config.example.yaml 为 config.yaml 后填写 MySQL 和服务地址"
         )
-    mtime = CONFIG_PATH.stat().st_mtime
+    mtime = path.stat().st_mtime
     if _cache is not None and _mtime == mtime:
         return _cache
-    with CONFIG_PATH.open(encoding="utf-8") as f:
+    with path.open(encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
         raise ValueError("config.yaml 格式无效，根节点必须是映射")
@@ -27,7 +36,7 @@ def load_config() -> dict:
     _cache = data
     _mtime = mtime
     if reloaded:
-        print(f"已热加载配置：{CONFIG_PATH}")
+        print(f"已热加载配置：{path}")
     return _cache
 
 
@@ -45,7 +54,8 @@ def _int(value: object, default: int, field: str) -> int:
 
 
 def server_config() -> dict:
-    raw = (load_config().get("server") or {}) if CONFIG_PATH.exists() else {}
+    path = config_path()
+    raw = (load_config().get("server") or {}) if path.exists() else {}
     if not isinstance(raw, dict):
         raise ValueError("config.yaml 中 server 必须是映射")
     host = str(raw.get("host") or "127.0.0.1").strip() or "127.0.0.1"
@@ -66,7 +76,7 @@ def mysql_config() -> dict:
         "host": host,
         "port": _int(raw.get("port"), 3306, "mysql.port"),
         "user": user,
-        "password": str(raw.get("password") or ""),
+        "password": str(raw.get("password") or os.environ.get("DB_PASSWORD") or ""),
         "database": database,
         "charset": charset,
     }

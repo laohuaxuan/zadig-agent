@@ -1,0 +1,49 @@
+imagePullSecret: regcred-vpc
+container:
+  env:
+    - name: CONFIG_FILE
+      value: /app/config.yaml
+  port: 8088
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 2048Mi
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /api/health
+      port: 8088
+    initialDelaySeconds: 20
+    periodSeconds: 20
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /api/health
+      port: 8088
+    initialDelaySeconds: 8
+    periodSeconds: 10
+  volumeMounts:
+    - mountPath: /app/checkpoints
+      name: zadig-agent-pvc
+      readOnly: false
+    - mountPath: /app/config.yaml
+      subPath: config.yaml
+      name: zadig-agent-config
+      readOnly: true
+volumes:
+  - name: zadig-agent-config
+    configMap:
+      name: zadig-agent-config
+  - name: zadig-agent-pvc
+    persistentVolumeClaim:
+      claimName: zadig-agent-pvc
+service:
+  type: ClusterIP
+  ports:
+    - port: 8088
+      targetPort: 8088
+      protocol: TCP
+      name: http

@@ -12,7 +12,7 @@ import pymysql
 from pymysql.cursors import DictCursor
 from yaml import safe_dump
 
-from utils.config import CONFIG_PATH, invalidate_config_cache, load_config, mysql_config
+from utils.config import config_path, invalidate_config_cache, load_config, mysql_config
 
 _DB_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _initialized = False
@@ -279,7 +279,8 @@ def _has_legacy_yaml(data: dict[str, Any]) -> bool:
 
 def _strip_yaml_secrets(data: dict[str, Any]) -> None:
     cleaned = {key: data[key] for key in _KEEP_KEYS if key in data and isinstance(data.get(key), dict)}
-    CONFIG_PATH.write_text(
+    path = config_path()
+    path.write_text(
         safe_dump(cleaned, allow_unicode=True, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
     )
@@ -287,7 +288,7 @@ def _strip_yaml_secrets(data: dict[str, Any]) -> None:
 
 
 def _migrate_yaml_if_needed() -> None:
-    if not CONFIG_PATH.exists():
+    if not config_path().exists():
         return
     data = dict(load_config())
     if not _has_legacy_yaml(data):

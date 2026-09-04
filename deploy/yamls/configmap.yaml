@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zadig-agent-config
+  namespace: devops
+data:
+  config.yaml: |
+    server:
+      host: "0.0.0.0"
+      port: 8088
+
+    mysql:
+      host: mysql.devops.svc.cluster.local
+      port: 3306
+      user: zadig_agent
+      password: ""
+      database: zadig_agent
+      charset: utf8mb4
+
+    integration:
+      sync_interval_seconds: 300
+
+    auth:
+      jwt_secret: "change-me-in-production"
+      token_expiry: "24h"
+      root_initial_name: "admin"
+      root_initial_phone: "13000000000"
+      root_initial_email: "admin@example.com"
+      root_initial_password: "Admin@123456"
+
+    feishu:
+      app_base_url: "https://zadig-agent.example.com"
+      app_id: ""
+      app_secret: ""
+      oauth_redirect_uri: ""
+      department_ids:
+        - "0"
+
+    mcp:
+      transport: "stdio"
+      host: "127.0.0.1"
+      port: 8000
+      token: ""
