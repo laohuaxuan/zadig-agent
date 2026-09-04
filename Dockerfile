@@ -24,7 +24,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY pyproject.toml uv.lock ./
 COPY README.md ./
 RUN pip install --no-cache-dir uv -i https://pypi.tuna.tsinghua.edu.cn/simple \
-    && uv sync --frozen
+    && uv sync --frozen \
+    && uv add bcrypt \
+    && uv sync
 
 RUN /src/.venv/bin/python -c "import bcrypt; print('bcrypt imported successfully')" || \
     (echo "bcrypt not found, installing manually..." && \
