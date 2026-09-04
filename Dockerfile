@@ -28,6 +28,7 @@ RUN pip install --no-cache-dir uv -i https://pypi.tuna.tsinghua.edu.cn/simple \
     && uv add bcrypt \
     && uv sync
 
+#测试是否安装成功
 RUN /src/.venv/bin/python -c "import bcrypt; print('bcrypt imported successfully')" || \
     (echo "bcrypt not found, installing manually..." && \
      /src/.venv/bin/pip install bcrypt -i https://pypi.tuna.tsinghua.edu.cn/simple)

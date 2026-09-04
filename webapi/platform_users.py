@@ -65,6 +65,27 @@ def get_user_by_feishu_open_id(open_id: str) -> dict[str, Any] | None:
     return row
 
 
+def map_users_by_feishu_open_ids(open_ids: list[str]) -> dict[str, int]:
+    ids = [str(item).strip() for item in open_ids if str(item).strip()]
+    if not ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(ids))
+    rows = query(
+        f"""
+        SELECT id, feishu_open_id
+        FROM platform_users
+        WHERE deleted_at IS NULL AND feishu_open_id IN ({placeholders})
+        """,
+        tuple(ids),
+    )
+    out: dict[str, int] = {}
+    for row in rows:
+        open_id = str(row.get("feishu_open_id") or "").strip()
+        if open_id:
+            out[open_id] = int(row["id"])
+    return out
+
+
 def authenticate_local(name: str, password: str) -> dict[str, Any] | None:
     row = get_user_by_name(name)
     if not row:

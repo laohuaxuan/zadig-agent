@@ -1,17 +1,54 @@
-"""飞书 Open API 客户端（OAuth + 通讯录搜索）。"""
+"""飞书 Open API 客户端（OAuth + 通讯录）。"""
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 
 from utils.config import feishu_config
 
 _OPENAPI = "https://open.feishu.cn/open-apis"
-_token_cache: dict[str, Any] = {"token": "", "expires_at": 0.0}
+_TOKEN_CACHE: dict[str, Any] = {"token": "", "expires_at": 0.0}
+_CONTACT_CACHE_TTL = 1800
+_CONTACT_CACHE: dict[str, Any] = {
+    "users": [],
+    "expires_at": 0.0,
+    "loading": False,
+    "error": "",
+}
+
+
+def _normalize_contact_user(item: dict[str, Any]) -> dict[str, Any]:
+    open_id = str(item.get("open_id") or "").strip()
+    name = str(item.get("name") or item.get("en_name") or open_id).strip()
+    return {
+        "open_id": open_id,
+        "name": name,
+        "email": str(item.get("email") or "").strip(),
+        "mobile": str(item.get("mobile") or "").strip(),
+    }
+
+
+def _filter_contact_users(users: list[dict[str, Any]], keyword: str) -> list[dict[str, Any]]:
+    query = keyword.strip().lower()
+    if not query:
+        return users
+    out: list[dict[str, Any]] = []
+    for user in users:
+        haystack = " ".join(
+            [
+                str(user.get("name") or ""),
+                str(user.get("email") or ""),
+                str(user.get("mobile") or ""),
+            ]
+        ).lower()
+        if query in haystack:
+            out.append(user)
+    return out
 
 
 class FeishuClient:
@@ -40,8 +77,8 @@ class FeishuClient:
 
     async def tenant_access_token(self) -> str:
         now = time.time()
-        if _token_cache["token"] and _token_cache["expires_at"] > now + 30:
-            return str(_token_cache["token"])
+        if _TOKEN_CACHE["token"] and _TOKEN_CACHE["expires_at"] > now + 30:
+            return str(_TOKEN_CACHE["token"])
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 f"{_OPENAPI}/auth/v3/tenant_access_token/internal",
@@ -52,8 +89,8 @@ class FeishuClient:
             raise ValueError(data.get("msg") or "获取飞书 tenant token 失败")
         token = str(data.get("tenant_access_token") or "")
         expire = int(data.get("expire") or 7200)
-        _token_cache["token"] = token
-        _token_cache["expires_at"] = now + expire
+        _TOKEN_CACHE["token"] = token
+        _TOKEN_CACHE["expires_at"] = now + expire
         return token
 
     async def exchange_oauth_code(self, code: str) -> dict[str, Any]:
@@ -88,33 +125,201 @@ class FeishuClient:
             "avatar": str(raw.get("avatar_url") or "").strip(),
         }
 
-    async def search_users(self, keyword: str, page_size: int = 20) -> list[dict[str, Any]]:
-        if not self.enabled():
-            return []
-        token = await self.tenant_access_token()
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{_OPENAPI}/contact/v3/users/search",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"page_size": min(page_size, 50)},
-                json={"query": keyword.strip()},
-            )
-            data = resp.json()
+    def _configured_department_roots(self) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for raw in self.cfg.get("department_ids") or ["0"]:
+            dept_id = str(raw).strip()
+            if not dept_id or dept_id in seen:
+                continue
+            seen.add(dept_id)
+            out.append(dept_id)
+        return out or ["0"]
+
+    async def _list_department_children(
+        self,
+        client: httpx.AsyncClient,
+        token: str,
+        department_id: str,
+        page_token: str = "",
+    ) -> tuple[list[str], str, bool]:
+        params: dict[str, Any] = {
+            "department_id_type": "department_id",
+            "fetch_child": "false",
+            "page_size": 50,
+        }
+        if page_token:
+            params["page_token"] = page_token
+        resp = await client.get(
+            f"{_OPENAPI}/contact/v3/departments/{quote(department_id, safe='')}/children",
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+        )
+        data = resp.json()
         if int(data.get("code", -1)) != 0:
-            raise ValueError(data.get("msg") or "搜索飞书用户失败")
-        items = ((data.get("data") or {}).get("users")) or []
-        out: list[dict[str, Any]] = []
-        for item in items:
+            raise ValueError(data.get("msg") or "获取飞书子部门失败")
+        payload = data.get("data") or {}
+        ids: list[str] = []
+        for item in payload.get("items") or []:
             if not isinstance(item, dict):
                 continue
-            open_id = str(item.get("open_id") or "").strip()
-            name = str(item.get("name") or item.get("en_name") or open_id).strip()
-            out.append(
-                {
-                    "open_id": open_id,
-                    "name": name,
-                    "email": str(item.get("email") or "").strip(),
-                    "mobile": str(item.get("mobile") or "").strip(),
-                }
-            )
+            dept_id = str(item.get("department_id") or item.get("open_department_id") or "").strip()
+            if dept_id:
+                ids.append(dept_id)
+        return ids, str(payload.get("page_token") or ""), bool(payload.get("has_more"))
+
+    async def _list_all_department_ids(self, client: httpx.AsyncClient, token: str, max_departments: int = 500) -> list[str]:
+        roots = self._configured_department_roots()
+        seen = set(roots)
+        queue = list(roots)
+        out = list(roots)
+        while queue:
+            if len(out) >= max_departments:
+                break
+            department_id = queue.pop(0)
+            page_token = ""
+            while True:
+                child_ids, page_token, has_more = await self._list_department_children(
+                    client, token, department_id, page_token
+                )
+                for child_id in child_ids:
+                    if child_id in seen:
+                        continue
+                    seen.add(child_id)
+                    out.append(child_id)
+                    queue.append(child_id)
+                    if len(out) >= max_departments:
+                        break
+                if len(out) >= max_departments or not has_more or not page_token:
+                    break
         return out
+
+    async def _list_users_by_department(
+        self,
+        client: httpx.AsyncClient,
+        token: str,
+        department_id: str,
+        page_token: str = "",
+    ) -> tuple[list[dict[str, Any]], str, bool]:
+        params: dict[str, Any] = {
+            "department_id": department_id,
+            "department_id_type": "department_id",
+            "user_id_type": "open_id",
+            "page_size": 50,
+        }
+        if page_token:
+            params["page_token"] = page_token
+        resp = await client.get(
+            f"{_OPENAPI}/contact/v3/users/find_by_department",
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+        )
+        data = resp.json()
+        if int(data.get("code", -1)) != 0:
+            raise ValueError(data.get("msg") or "获取飞书部门成员失败")
+        payload = data.get("data") or {}
+        items = [_normalize_contact_user(item) for item in (payload.get("items") or []) if isinstance(item, dict)]
+        return items, str(payload.get("page_token") or ""), bool(payload.get("has_more"))
+
+    async def _collect_all_contact_users(self, max_users: int = 2000) -> tuple[list[dict[str, Any]], str]:
+        token = await self.tenant_access_token()
+        warnings: list[str] = []
+        users_by_open_id: dict[str, dict[str, Any]] = {}
+        async with httpx.AsyncClient(timeout=30) as client:
+            department_ids = await self._list_all_department_ids(client, token)
+            for department_id in department_ids:
+                page_token = ""
+                while True:
+                    try:
+                        batch, page_token, has_more = await self._list_users_by_department(
+                            client, token, department_id, page_token
+                        )
+                    except ValueError as exc:
+                        warnings.append(str(exc))
+                        break
+                    for user in batch:
+                        open_id = user.get("open_id")
+                        if open_id:
+                            users_by_open_id[str(open_id)] = user
+                        if len(users_by_open_id) >= max_users:
+                            warnings.append(f"通讯录已加载前 {max_users} 名成员")
+                            break
+                    if len(users_by_open_id) >= max_users or not has_more or not page_token:
+                        break
+                if len(users_by_open_id) >= max_users:
+                    break
+        users = sorted(users_by_open_id.values(), key=lambda item: str(item.get("name") or ""))
+        warning = "；".join(dict.fromkeys(w for w in warnings if w))
+        return users, warning
+
+    def _cached_users_snapshot(self) -> list[dict[str, Any]] | None:
+        if _CONTACT_CACHE["loading"]:
+            return None
+        if time.time() >= float(_CONTACT_CACHE["expires_at"] or 0):
+            return None
+        users = _CONTACT_CACHE.get("users") or []
+        if not users:
+            return None
+        return list(users)
+
+    async def _refresh_contact_cache(self) -> tuple[list[dict[str, Any]], str]:
+        if _CONTACT_CACHE["loading"]:
+            while _CONTACT_CACHE["loading"]:
+                await asyncio.sleep(0.2)
+            cached = self._cached_users_snapshot()
+            if cached is not None:
+                return cached, str(_CONTACT_CACHE.get("error") or "")
+        _CONTACT_CACHE["loading"] = True
+        try:
+            users, warning = await self._collect_all_contact_users()
+            _CONTACT_CACHE["users"] = users
+            _CONTACT_CACHE["expires_at"] = time.time() + _CONTACT_CACHE_TTL
+            _CONTACT_CACHE["error"] = warning
+            return users, warning
+        finally:
+            _CONTACT_CACHE["loading"] = False
+
+    def warmup_contact_users_async(self) -> None:
+        if not self.enabled() or _CONTACT_CACHE["loading"] or self._cached_users_snapshot() is not None:
+            return
+
+        async def _run() -> None:
+            try:
+                await self._refresh_contact_cache()
+            except Exception as exc:
+                _CONTACT_CACHE["error"] = str(exc) or "通讯录加载失败"
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(_run())
+
+    async def list_contact_users(self, keyword: str = "", page_size: int = 30) -> dict[str, Any]:
+        if not self.enabled():
+            return {"items": [], "warning": "", "cached": False}
+        page_size = min(max(int(page_size or 30), 1), 50)
+        keyword = keyword.strip()
+
+        cached = self._cached_users_snapshot()
+        if cached is None:
+            if _CONTACT_CACHE["loading"]:
+                return {"items": [], "warning": "通讯录加载中，请稍候再试", "cached": False}
+            users, warning = await self._refresh_contact_cache()
+        else:
+            users, warning = cached, str(_CONTACT_CACHE.get("error") or "")
+
+        filtered = _filter_contact_users(users, keyword)
+        return {
+            "items": filtered[:page_size],
+            "warning": warning,
+            "cached": cached is not None,
+        }
+
+    async def search_users(self, keyword: str, page_size: int = 20) -> list[dict[str, Any]]:
+        result = await self.list_contact_users(keyword, page_size)
+        warning = str(result.get("warning") or "").strip()
+        items = result.get("items") or []
+        if warning and not items and "加载中" not in warning:
+            raise ValueError(warning)
+        return items

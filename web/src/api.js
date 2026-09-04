@@ -19,10 +19,15 @@ export function setAuthToken(token) {
   else localStorage.removeItem("zadig_auth_token");
 }
 
-async function request(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
+function withAuthHeaders(headers = {}) {
   const token = getAuthToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (!token) return headers;
+  // 平台网关会拦截 Authorization: Bearer，改用后端已支持的 X-Access-Token。
+  return { ...headers, "X-Access-Token": token };
+}
+
+async function request(path, options = {}) {
+  const headers = withAuthHeaders(options.headers || {});
   const resp = await fetch(path, { ...options, headers, credentials: "include" });
   const data = await resp.json().catch(() => ({}));
   if (resp.status === 401) {
@@ -283,6 +288,10 @@ export function fetchFeishuUsers(q, pageSize = 30) {
   return request(`${url.pathname}${url.search}`);
 }
 
+export function warmupFeishuUsers() {
+  return request("/api/feishu/warmup", { method: "POST" });
+}
+
 export function ensureFeishuUser(body) {
   return request("/api/feishu/users/ensure", {
     method: "POST",
@@ -360,11 +369,8 @@ export function revokeWorkflow(id) {
 
 export async function streamWorkflowExecution(instanceId, handlers = {}) {
   const { onLog, onDone, onError, onInputRequired, onMeta, signal } = handlers;
-  const token = getAuthToken();
-  const headers = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
   const resp = await fetch(`/api/workflows/instances/${instanceId}/execute/stream`, {
-    headers,
+    headers: withAuthHeaders(),
     credentials: "include",
     signal,
   });

@@ -29,6 +29,7 @@ from webapi.platform_users import (
     delete_user,
     ensure_feishu_user,
     get_user_by_id,
+    map_users_by_feishu_open_ids,
     list_approver_candidates,
     list_users,
     reset_user_password,
@@ -143,7 +144,11 @@ def require_roles(*roles: str):
     return _dep
 
 
-def _set_auth_cookie(response: Response, token: str) -> None:
+def _set_auth_cookie(response: Response, token: str, request: Request | None = None) -> None:
+    secure = False
+    if request is not None:
+        scheme = str(request.headers.get("x-forwarded-proto") or request.url.scheme or "").lower()
+        secure = scheme == "https"
     response.set_cookie(
         AUTH_COOKIE,
         token,
@@ -151,6 +156,7 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         httponly=True,
         samesite="lax",
         path="/",
+        secure=secure,
     )
 
 
@@ -209,7 +215,7 @@ async def login_feishu_callback(request: Request, code: str = "", state: str = "
     )
     response = RedirectResponse(f"{front}/?feishu_token={token}", status_code=302)
     response.delete_cookie(OAUTH_STATE_COOKIE, path="/")
-    _set_auth_cookie(response, token)
+    _set_auth_cookie(response, token, request)
     return response
 
 
@@ -222,7 +228,7 @@ def _login_local(body: LocalLoginBody, request: Request, response: Response, *, 
     if not user:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = issue_token(user)
-    _set_auth_cookie(response, token)
+    _set_auth_cookie(response, token, request)
     write_audit(
         user_id=user["id"],
         username=user["name"],
@@ -378,10 +384,49 @@ async def api_feishu_users(q: str = "", page_size: int = 20, user: CurrentUser =
     if not _can_use_feishu_directory(user.role):
         raise HTTPException(status_code=403, detail="无权访问")
     try:
-        items = await _feishu.search_users(q, page_size)
+        result = await _feishu.list_contact_users(q, page_size)
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"ok": True, "items": items}
+    items = []
+    open_ids: list[str] = []
+    for raw in result.get("items") or []:
+        if not isinstance(raw, dict):
+            continue
+        open_id = str(raw.get("open_id") or "").strip()
+        item = {
+            "open_id": open_id,
+            "name": raw.get("name") or "",
+            "display_name": raw.get("name") or "",
+            "email": raw.get("email") or "",
+            "mobile": raw.get("mobile") or "",
+            "phone": raw.get("mobile") or "",
+            "source": "feishu",
+            "auth_source": "feishu",
+        }
+        if open_id:
+            open_ids.append(open_id)
+        items.append(item)
+    linked = map_users_by_feishu_open_ids(open_ids)
+    for item in items:
+        open_id = str(item.get("open_id") or "")
+        if open_id and open_id in linked:
+            item["user_id"] = linked[open_id]
+    return {
+        "ok": True,
+        "items": items,
+        "warning": str(result.get("warning") or ""),
+        "cached": bool(result.get("cached")),
+    }
+
+
+@router.post("/api/feishu/warmup")
+async def api_feishu_warmup(user: CurrentUser = Depends(get_current_user)) -> dict[str, Any]:
+    if not _can_use_feishu_directory(user.role):
+        raise HTTPException(status_code=403, detail="无权访问")
+    if not _feishu.enabled():
+        raise HTTPException(status_code=400, detail="飞书 Open API 未配置")
+    _feishu.warmup_contact_users_async()
+    return {"ok": True, "message": "warmup started"}
 
 
 @router.post("/api/feishu/users/ensure")

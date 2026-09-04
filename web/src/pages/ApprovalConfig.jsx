@@ -5,6 +5,7 @@ import {
   fetchApprovalTemplate,
   fetchApprovalTemplates,
   updateApprovalTemplate,
+  warmupFeishuUsers,
 } from "../api.js";
 import { useAuth } from "../AuthContext.jsx";
 import FeishuAssigneePicker from "../components/FeishuAssigneePicker.jsx";
@@ -292,6 +293,10 @@ export default function ApprovalConfig() {
   useEffect(() => {
     loadTemplates().catch((err) => showMessage(err.message, "error"));
   }, [loadTemplates, showMessage]);
+
+  useEffect(() => {
+    warmupFeishuUsers().catch(() => {});
+  }, []);
 
   function closeModal() {
     setEditorMode(null);

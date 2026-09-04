@@ -274,7 +274,9 @@ export default function FeishuAssigneePicker({
               <LoadingIndicator label="加载中..." size="sm" inline />
             </div>
           ) : options.length === 0 ? (
-            <div className="feishu-assignee-option empty">{listWarning || (query.trim() ? "未找到匹配成员" : "输入关键词搜索")}</div>
+            <div className="feishu-assignee-option empty">
+              {listWarning || (query.trim() ? "未找到匹配成员" : "输入关键词搜索飞书或本地账号")}
+            </div>
           ) : (
             options.map((u) => {
               const uid = Number(u.user_id);

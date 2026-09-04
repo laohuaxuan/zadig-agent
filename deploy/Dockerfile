@@ -9,7 +9,6 @@ FROM acr-openxlab-prod-registry-vpc.cn-shanghai.cr.aliyuncs.com/public/node:18-a
 
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
-COPY README.md ./
 RUN npm ci --registry=https://registry.npmmirror.com
 
 COPY web/ ./
@@ -25,7 +24,7 @@ WORKDIR /src
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 RUN pip install --no-cache-dir uv -i https://pypi.tuna.tsinghua.edu.cn/simple \
     && uv sync --frozen --no-dev
 

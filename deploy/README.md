@@ -77,3 +77,5 @@ mysql -h <host> -u <user> -p zadig_agent < deploy/sql/clear_workflow_data.sql
 - `mysql.password` 为空时，从环境变量 `DB_PASSWORD` 读取。
 - Agent、Zadig 实例、技能与模板等业务数据保存在 MySQL，不在镜像内。
 - 首次启动会根据 `auth.root_initial_*` 自动创建超级管理员（若库中尚无 root 本地账号）。
+- 若集群 Ingress/网关会校验 `Authorization: Bearer`，前端已通过 `X-Access-Token` 传递登录态（与 `mse-domain-binding` 一致）；不要改回仅使用 Bearer。
+- 生产环境请将 ConfigMap 中 `feishu.app_base_url` 设为实际访问域名（如 `https://zadig-agent.openxlab.org.cn`），并填写飞书 `app_id` / `app_secret`。
