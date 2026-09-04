@@ -24,7 +24,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY pyproject.toml uv.lock ./
 COPY README.md ./
 RUN pip install --no-cache-dir uv -i https://pypi.tuna.tsinghua.edu.cn/simple \
-    && uv sync --frozen --no-dev
+    && uv sync --frozen
 
 COPY agent ./agent
 COPY model ./model
