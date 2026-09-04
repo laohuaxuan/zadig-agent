@@ -120,6 +120,11 @@ def openrouter_config() -> dict:
         "api_key": api_key,
         "model": model,
         "base_url": base_url,
+        "primary_model": str(
+            (item.get("models") or {}).get("primary") or item.get("model") or model
+        ).strip(),
+        "is_primary_model": bool(item.get("is_primary_model", True)),
+        "is_default": bool(item.get("is_default")),
     }
 
 
@@ -167,6 +172,8 @@ def feishu_config() -> dict:
         "app_id": str(raw.get("app_id") or "").strip(),
         "app_secret": str(raw.get("app_secret") or "").strip(),
         "oauth_redirect_uri": str(raw.get("oauth_redirect_uri") or "").strip(),
+        "verification_token": str(raw.get("verification_token") or "").strip(),
+        "encrypt_key": str(raw.get("encrypt_key") or "").strip(),
         "department_ids": [str(item).strip() for item in dept_ids if str(item).strip()],
     }
 

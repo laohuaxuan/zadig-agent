@@ -757,7 +757,7 @@ def build_flow_steps(
         agent_step["status"] = "pending"
         agent_step["action_label"] = "执行中"
     elif app_status == "失败":
-        agent_step["status"] = "rejected"
+        agent_step["status"] = "failed"
         agent_step["actor_name"] = str(instance.get("initiator_name") or "申请人")
         agent_step["action_label"] = "执行失败"
     elif status == STATUS_COMPLETED and app_status in {"待执行", "已通过", ""}:
@@ -802,6 +802,7 @@ def get_instance_detail(instance_id: int, user_id: int) -> dict[str, Any]:
             from webapi.agent_runner import build_project_url
 
             execution_context = _parse_execution_context(app_row.get("execution_context_json"))
+            agent_meta = execution_context.get("agent") if isinstance(execution_context, dict) else None
             application = {
                 "record_id": app_row.get("record_id") or "",
                 "flow_status": application_status,
@@ -810,8 +811,9 @@ def get_instance_detail(instance_id: int, user_id: int) -> dict[str, Any]:
                 "project_key": project_key,
                 "project_url": str(app_row.get("project_url") or "").strip() or build_project_url(project_key),
                 "execution_context": execution_context,
+                "agent_meta": agent_meta if isinstance(agent_meta, dict) else None,
             }
-    from webapi.applications import is_execution_awaiting_input
+    from webapi.applications import can_execute_application, is_execution_awaiting_input
 
     awaiting_input = is_execution_awaiting_input(instance_id)
     is_readonly = status in {STATUS_REJECTED, STATUS_REVOKED} or (
@@ -858,9 +860,12 @@ def get_instance_detail(instance_id: int, user_id: int) -> dict[str, Any]:
         "can_revoke": int(instance["initiator_id"]) == user_id and status == STATUS_PENDING,
         "can_execute": bool(
             application
-            and int(instance["initiator_id"]) == user_id
-            and status == STATUS_COMPLETED
-            and application_status in {"待执行", "已通过", "失败"}
+            and can_execute_application(
+                {"initiator_id": int(instance["initiator_id"]), "approval_status": application_status},
+                initiator_id=user_id,
+                workflow_status=status,
+                instance_id=instance_id,
+            )
         ),
         "is_readonly": is_readonly,
         "execution_session": {
@@ -872,9 +877,12 @@ def get_instance_detail(instance_id: int, user_id: int) -> dict[str, Any]:
             "can_revoke": int(instance["initiator_id"]) == user_id and status == STATUS_PENDING,
             "can_execute": bool(
                 application
-                and int(instance["initiator_id"]) == user_id
-                and status == STATUS_COMPLETED
-                and application_status in {"待执行", "已通过", "失败"}
+                and can_execute_application(
+                    {"initiator_id": int(instance["initiator_id"]), "approval_status": application_status},
+                    initiator_id=user_id,
+                    workflow_status=status,
+                    instance_id=instance_id,
+                )
             ),
             "pending_task_id": int(pending_task["id"]) if pending_task else 0,
         },

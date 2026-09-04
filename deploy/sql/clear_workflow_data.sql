@@ -4,6 +4,7 @@ USE `zadig_agent`;
 SET FOREIGN_KEY_CHECKS = 0;
 
 DELETE FROM `workflow_records`;
+DELETE FROM `workflow_feishu_cards`;
 DELETE FROM `workflow_tasks`;
 DELETE FROM `workflow_ccs`;
 DELETE FROM `workflow_instances`;

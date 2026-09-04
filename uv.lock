@@ -2199,6 +2199,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "bcrypt" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "langchain-community" },
@@ -2216,6 +2217,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "bcrypt", specifier = ">=4.2.1" },
+    { name = "cryptography", specifier = ">=44.0.0" },
     { name = "fastapi", specifier = ">=0.116.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain-community", specifier = ">=0.4.2" },

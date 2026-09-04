@@ -680,6 +680,24 @@ def _migrate_platform_if_needed() -> None:
                 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workflow_feishu_cards (
+                    id BIGINT NOT NULL AUTO_INCREMENT,
+                    instance_id BIGINT NOT NULL,
+                    task_id BIGINT NOT NULL DEFAULT 0,
+                    user_id BIGINT NOT NULL,
+                    open_message_id VARCHAR(128) NOT NULL,
+                    open_id VARCHAR(128) NOT NULL DEFAULT '',
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    PRIMARY KEY (id),
+                    KEY idx_wfc_instance (instance_id),
+                    KEY idx_wfc_user (user_id),
+                    KEY idx_wfc_message (open_message_id)
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
             for column_sql in (
                 "ALTER TABLE project_applications ADD COLUMN execution_log MEDIUMTEXT NULL AFTER process_message",
                 "ALTER TABLE project_applications ADD COLUMN project_url VARCHAR(512) NOT NULL DEFAULT '' AFTER execution_log",

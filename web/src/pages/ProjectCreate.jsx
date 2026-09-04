@@ -289,6 +289,11 @@ export default function ProjectCreate() {
       if (key === "namespace") {
         namespaceTouched.current = true;
       }
+      if (key === "cluster_name") {
+        if (!namespaceTouched.current) {
+          next.namespace = "";
+        }
+      }
       if (key === "project_name") {
         const derived = slugKey(value);
         if (!projectKeyTouched.current) {
@@ -300,23 +305,14 @@ export default function ProjectCreate() {
         if (!workflowNameTouched.current) {
           next.workflow_name = defaultWorkflowName(next.project_key, value, next.environment);
         }
-        if (!namespaceTouched.current) {
-          next.namespace = defaultNamespace(next.project_key, value, next.environment);
-        }
       }
       if (key === "project_key") {
         if (!workflowNameTouched.current) {
           next.workflow_name = defaultWorkflowName(value, next.project_name, next.environment);
         }
-        if (!namespaceTouched.current) {
-          next.namespace = defaultNamespace(value, next.project_name, next.environment);
-        }
       }
       if (key === "environment") {
         envNameTouched.current = true;
-        if (!namespaceTouched.current) {
-          next.namespace = defaultNamespace(next.project_key || prev.project_key, next.project_name, value);
-        }
         if (!workflowNameTouched.current) {
           next.workflow_name = defaultWorkflowName(next.project_key || prev.project_key, next.project_name, value);
         }
@@ -326,13 +322,6 @@ export default function ProjectCreate() {
         next.environment_production = isProduction;
         if (!envNameTouched.current) {
           next.environment = DEFAULT_ENV_NAME[isProduction];
-        }
-        if (!namespaceTouched.current) {
-          next.namespace = defaultNamespace(
-            next.project_key || prev.project_key,
-            next.project_name,
-            next.environment,
-          );
         }
         if (!workflowNameTouched.current) {
           next.workflow_name = defaultWorkflowName(
@@ -407,7 +396,7 @@ export default function ProjectCreate() {
       project_key: form.project_key || slugKey(form.project_name),
       service_name: form.service_name || slugKey(form.project_name),
       workflow_name: form.workflow_name || suggestedWorkflowName,
-      namespace: form.namespace || suggestedNamespace,
+      namespace: form.namespace,
       dockerfile_path: dockerfilePath,
       build_variables: form.build_variables.filter((row) => row.key.trim()),
       authorized_users: authorized,
@@ -553,7 +542,7 @@ export default function ProjectCreate() {
 
         <section className="form-section">
           <h2>K8s 集群</h2>
-          <div className="form-grid">
+          <div className="form-grid form-grid-align-start">
             <label>
               <FieldLabel required>集群</FieldLabel>
               <ScrollSelect
@@ -569,9 +558,6 @@ export default function ProjectCreate() {
                   </option>
                 ))}
               </ScrollSelect>
-              {selectedCluster?.description ? (
-                <span className="field-hint">{selectedCluster.description}</span>
-              ) : null}
             </label>
             <label>
               <FieldLabel required>命名空间</FieldLabel>
@@ -585,7 +571,7 @@ export default function ProjectCreate() {
                     ? "请先选择集群"
                     : optionsLoading.clusterNamespaces
                       ? "正在加载中…"
-                      : suggestedNamespace || "project-dev"
+                      : "请选择或输入命名空间"
                 }
                 value={form.namespace}
                 onChange={(e) => update("namespace", e.target.value)}
@@ -597,6 +583,9 @@ export default function ProjectCreate() {
               />
             </label>
           </div>
+          {selectedCluster?.description ? (
+            <p className="field-hint">{selectedCluster.description}</p>
+          ) : null}
           <p className="field-hint">
             选择集群后会从 Zadig 加载已有命名空间；也可直接输入新命名空间。建议：{suggestedNamespace || "项目标识-环境"}
           </p>

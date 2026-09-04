@@ -38,5 +38,7 @@ feishu:
   app_id: ""
   app_secret: ""
   oauth_redirect_uri: ""
+  verification_token: ""
+  encrypt_key: ""
   department_ids:
     - "0"

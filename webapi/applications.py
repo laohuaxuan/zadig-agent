@@ -7,6 +7,7 @@ import json
 from typing import Any, AsyncIterator
 
 from utils.db import _now, execute, query, query_one
+from utils.llm_errors import format_llm_error
 from webapi.agent_runner import (
     build_project_url,
     format_agent_meta_line,
@@ -18,6 +19,7 @@ from webapi.agent_resources import public_execution_context, resolve_execution_r
 from webapi.platform_users import get_user_by_id, new_record_id
 from webapi.platform_roles import WORKFLOW_TYPE_ADD_SERVICE, WORKFLOW_TYPE_ADD_WORKFLOW, WORKFLOW_TYPE_HELM_PROJECT
 from webapi.workflows import STATUS_COMPLETED, STATUS_REJECTED, STATUS_REVOKED, create_helm_project_workflow
+from webapi.workflow_notify import schedule_submit_notifications
 from webapi.zadig_meta import build_application_plan
 
 _EXECUTABLE_STATUSES = {"待执行", "已通过", "失败"}
@@ -96,6 +98,9 @@ def _public_application(row: dict[str, Any]) -> dict[str, Any]:
     execution_context = row.get("execution_context_json")
     if isinstance(execution_context, str):
         execution_context = json.loads(execution_context or "null")
+    if not isinstance(execution_context, dict):
+        execution_context = None
+    agent_meta = execution_context.get("agent") if execution_context else None
     return {
         "id": int(row["id"]),
         "record_id": row["record_id"],
@@ -107,7 +112,8 @@ def _public_application(row: dict[str, Any]) -> dict[str, Any]:
         "process_message": row.get("process_message") or "",
         "execution_log": row.get("execution_log") or "",
         "project_url": project_url,
-        "execution_context": execution_context if isinstance(execution_context, dict) else None,
+        "execution_context": execution_context,
+        "agent_meta": agent_meta if isinstance(agent_meta, dict) else None,
         "workflow_instance_id": int(row["workflow_instance_id"]) if row.get("workflow_instance_id") else None,
         "created_at": str(row.get("created_at") or ""),
         "updated_at": str(row.get("updated_at") or ""),
@@ -124,13 +130,21 @@ def get_application_by_instance(instance_id: int) -> dict[str, Any] | None:
     return _public_application(row) if row else None
 
 
-def can_execute_application(app: dict[str, Any] | None, *, initiator_id: int, workflow_status: str) -> bool:
+def can_execute_application(
+    app: dict[str, Any] | None,
+    *,
+    initiator_id: int,
+    workflow_status: str,
+    instance_id: int = 0,
+) -> bool:
     if not app or workflow_status != STATUS_COMPLETED:
+        return False
+    if int(app.get("initiator_id") or 0) != initiator_id:
         return False
     status = str(app.get("approval_status") or "")
     if status == "执行中":
-        return False
-    return int(app.get("initiator_id") or 0) == initiator_id and status in _EXECUTABLE_STATUSES
+        return instance_id > 0 and instance_id not in _execution_input_queues
+    return status in _EXECUTABLE_STATUSES
 
 
 def _build_form_data(payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -235,6 +249,7 @@ async def submit_application(payload: dict[str, Any], initiator_id: int) -> dict
     item = _public_application(row) if row else {}
     item["serial_no"] = serial_no
     item["workflow_instance_id"] = instance_id
+    schedule_submit_notifications(instance_id)
     return item
 
 
@@ -284,7 +299,7 @@ def _validate_execute_request(instance_id: int, user_id: int) -> tuple[dict[str,
     if int(app["initiator_id"]) != user_id:
         raise PermissionError("仅申请人可执行 Agent")
     status = str(app.get("approval_status") or "")
-    if status == "执行中" and instance_id not in _execution_input_queues:
+    if status == "执行中" and instance_id in _execution_input_queues:
         raise ValueError("Agent 正在执行中，请稍候")
     if status not in _EXECUTABLE_STATUSES and status != "执行中":
         raise ValueError(f"当前状态「{status}」不可执行")
@@ -306,13 +321,46 @@ async def submit_execution_reply(instance_id: int, user_id: int, message: str) -
     await queue.put(text)
 
 
+def _finalize_execution_success(
+    app_id: int,
+    *,
+    summary: str,
+    project_url: str,
+    execution_context: dict[str, Any],
+) -> None:
+    execute(
+        """
+        UPDATE project_applications
+        SET approval_status = %s, process_message = %s, project_url = %s,
+            execution_context_json = %s, updated_at = %s
+        WHERE id = %s
+        """,
+        (
+            "已完成",
+            summary,
+            project_url,
+            json.dumps(execution_context, ensure_ascii=False),
+            _now(),
+            app_id,
+        ),
+    )
+
+
+def _finalize_execution_error(app_id: int, err: str) -> None:
+    message = format_llm_error(str(err or "").strip() or "Agent 执行失败")
+    _append_execution_log(app_id, f"\n❌ 执行失败：{message}\n")
+    execute(
+        """
+        UPDATE project_applications
+        SET approval_status = %s, process_message = %s, updated_at = %s
+        WHERE id = %s
+        """,
+        ("失败", message, _now(), app_id),
+    )
+
+
 async def stream_application_execution(instance_id: int, user_id: int) -> AsyncIterator[dict[str, Any]]:
     _, app_row, app = _validate_execute_request(instance_id, user_id)
-    status = str(app.get("approval_status") or "")
-    if status == "执行中":
-        raise ValueError("Agent 正在执行中，请稍候")
-    if status not in _EXECUTABLE_STATUSES:
-        raise ValueError(f"当前状态「{status}」不可执行")
 
     app_id = int(app_row["id"])
     payload = _load_payload(app_row)
@@ -322,6 +370,7 @@ async def stream_application_execution(instance_id: int, user_id: int) -> AsyncI
     execution_context = public_execution_context(resolve_execution_resources(payload, plan))
 
     agent_meta = get_agent_meta()
+    execution_context["agent"] = agent_meta
     footer = format_execution_footer(agent_meta, execution_context)
     _append_execution_log(app_id, f"{footer}\n")
 
@@ -348,9 +397,24 @@ async def stream_application_execution(instance_id: int, user_id: int) -> AsyncI
     async def runner() -> None:
         try:
             result = await run_project_create_agent(payload, log_fn=log_fn, input_fn=input_fn)
-            await event_queue.put(("done", result))
+            project_url = str(
+                result.get("project_url") or build_project_url(result.get("project_key") or app["project_key"])
+            )
+            summary = str(result.get("summary") or "Agent 执行完成")
+            result_context = dict(result.get("execution_context") or execution_context)
+            if execution_context.get("agent") and not result_context.get("agent"):
+                result_context["agent"] = execution_context["agent"]
+            _finalize_execution_success(
+                app_id,
+                summary=summary,
+                project_url=project_url,
+                execution_context=result_context,
+            )
+            await event_queue.put(("done", {**result, "project_url": project_url, "summary": summary, "execution_context": result_context}))
         except Exception as exc:
-            await event_queue.put(("error", exc))
+            err = str(exc).strip() or repr(exc)
+            _finalize_execution_error(app_id, err)
+            await event_queue.put(("error", err))
         finally:
             _execution_input_queues.pop(instance_id, None)
 
@@ -365,7 +429,11 @@ async def stream_application_execution(instance_id: int, user_id: int) -> AsyncI
 
     try:
         while True:
-            kind, payload_item = await event_queue.get()
+            try:
+                kind, payload_item = await asyncio.wait_for(event_queue.get(), timeout=20.0)
+            except asyncio.TimeoutError:
+                yield {"type": "ping"}
+                continue
             if kind == "log":
                 yield {"type": "log", "text": payload_item}
                 continue
@@ -374,27 +442,9 @@ async def stream_application_execution(instance_id: int, user_id: int) -> AsyncI
                 continue
             if kind == "done":
                 result = payload_item
-                project_url = str(
-                    result.get("project_url") or build_project_url(result.get("project_key") or app["project_key"])
-                )
+                project_url = str(result.get("project_url") or "")
                 summary = str(result.get("summary") or "Agent 执行完成")
                 result_context = result.get("execution_context") or execution_context
-                execute(
-                    """
-                    UPDATE project_applications
-                    SET approval_status = %s, process_message = %s, project_url = %s,
-                        execution_context_json = %s, updated_at = %s
-                    WHERE id = %s
-                    """,
-                    (
-                        "已完成",
-                        summary,
-                        project_url,
-                        json.dumps(result_context, ensure_ascii=False),
-                        _now(),
-                        app_id,
-                    ),
-                )
                 yield {
                     "type": "done",
                     "summary": summary,
@@ -407,19 +457,14 @@ async def stream_application_execution(instance_id: int, user_id: int) -> AsyncI
                 break
             if kind == "error":
                 err = str(payload_item)
-                execute(
-                    """
-                    UPDATE project_applications
-                    SET approval_status = %s, process_message = %s, updated_at = %s
-                    WHERE id = %s
-                    """,
-                    ("失败", err, _now(), app_id),
-                )
                 yield {"type": "log", "text": f"\n❌ 执行失败：{err}\n"}
                 yield {"type": "error", "message": err, "flow_status": "失败"}
                 break
     finally:
         _execution_input_queues.pop(instance_id, None)
+        if not task.done():
+            # 客户端断开 SSE 时仍让 runner 在后台跑完并落库。
+            return
         await task
 
 

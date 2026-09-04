@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 from utils.db import execute, query, query_one
+from utils.llm_errors import format_http_llm_error, format_llm_error
 
 _NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 _PLACEHOLDER_KEYS = {"YOUR_OPENROUTER_API_KEY", ""}
@@ -122,21 +123,25 @@ def probe_model(base_url: str, api_key: str, model: str) -> tuple[bool, str]:
     if cached and now - cached[0] < _PROBE_TTL:
         return cached[1], cached[2]
     try:
-        resp = httpx.get(
-            f"{url}/models",
-            headers={"Authorization": f"Bearer {key}"},
-            timeout=8.0,
+        resp = httpx.post(
+            f"{url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": text,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+            },
+            timeout=15.0,
         )
         if resp.status_code >= 400:
-            result = (False, f"HTTP {resp.status_code}")
+            result = (False, format_http_llm_error(resp.status_code, resp.text))
         else:
-            known_ids = _extract_model_ids(resp.json())
-            if _model_matches(text, known_ids):
-                result = (True, "")
-            else:
-                result = (False, f"模型 {text} 不可用")
+            result = (True, "")
     except Exception as exc:
-        result = (False, str(exc)[:160])
+        result = (False, format_llm_error(str(exc)))
     _probe_cache[cache_key] = (now, *result)
     return result
 

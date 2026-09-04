@@ -316,6 +316,11 @@ export default function ServiceAdd() {
       if (key === "namespace") {
         namespaceTouched.current = true;
       }
+      if (key === "cluster_name") {
+        if (!namespaceTouched.current) {
+          next.namespace = "";
+        }
+      }
       if (key === "project_key") {
         namespaceTouched.current = false;
         workflowNameTouched.current = false;
@@ -564,7 +569,7 @@ export default function ServiceAdd() {
 
         <section className="form-section">
           <h2>K8s 集群</h2>
-          <div className="form-grid">
+          <div className="form-grid form-grid-align-start">
             <label>
               <FieldLabel required>集群</FieldLabel>
               <ScrollSelect
@@ -580,9 +585,6 @@ export default function ServiceAdd() {
                   </option>
                 ))}
               </ScrollSelect>
-              {selectedCluster?.description ? (
-                <span className="field-hint">{selectedCluster.description}</span>
-              ) : null}
             </label>
             <label>
               <FieldLabel required>命名空间</FieldLabel>
@@ -591,7 +593,13 @@ export default function ServiceAdd() {
                 allowCustom
                 disabled={!form.cluster_name}
                 loading={Boolean(form.cluster_name && optionsLoading.clusterNamespaces)}
-                placeholder={!form.cluster_name ? "请先选择集群" : "命名空间"}
+                placeholder={
+                  !form.cluster_name
+                    ? "请先选择集群"
+                    : optionsLoading.clusterNamespaces
+                      ? "正在加载中…"
+                      : "请选择或输入命名空间"
+                }
                 value={form.namespace}
                 onChange={(e) => update("namespace", e.target.value)}
                 options={options.clusterNamespaces.map((item) => ({
@@ -602,6 +610,9 @@ export default function ServiceAdd() {
               />
             </label>
           </div>
+          {selectedCluster?.description ? (
+            <p className="field-hint">{selectedCluster.description}</p>
+          ) : null}
         </section>
 
         <section className="form-section">

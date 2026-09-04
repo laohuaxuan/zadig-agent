@@ -71,6 +71,7 @@ from webapi.settings import (
     update_zadig_instance,
 )
 from webapi.platform_routes import AUTH_COOKIE, _extract_token, router as platform_router
+from webapi.feishu_routes import router as feishu_router
 from webapi.platform_auth import parse_token
 from webapi.platform_users import get_user_by_id
 from webapi.zadig_meta import (
@@ -148,6 +149,8 @@ _PUBLIC_API_PREFIXES = (
     "/api/login/feishu",
     "/api/login/local",
     "/api/login/root",
+    "/api/feishu/card/callback",
+    "/api/feishu/approval/action",
 )
 
 
@@ -171,6 +174,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+app.include_router(feishu_router)
 app.include_router(platform_router)
 
 

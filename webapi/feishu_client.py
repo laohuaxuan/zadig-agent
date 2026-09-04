@@ -323,3 +323,63 @@ class FeishuClient:
         if warning and not items and "加载中" not in warning:
             raise ValueError(warning)
         return items
+
+    async def send_interactive_card(self, open_id: str, card: dict[str, Any]) -> str:
+        from webapi.feishu_cards import marshal_interactive_card
+
+        if not self.enabled():
+            raise ValueError("飞书 Open API 未配置")
+        open_id = open_id.strip()
+        if not open_id:
+            raise ValueError("feishu open_id empty")
+        content = marshal_interactive_card(card)
+        token = await self.tenant_access_token()
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{_OPENAPI}/im/v1/messages",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"receive_id_type": "open_id"},
+                json={"receive_id": open_id, "msg_type": "interactive", "content": content},
+            )
+            data = resp.json()
+        if int(data.get("code", -1)) != 0:
+            raise ValueError(data.get("msg") or "发送飞书卡片失败")
+        return str(((data.get("data") or {}).get("message_id")) or "").strip()
+
+    async def update_interactive_message(self, message_id: str, card: dict[str, Any]) -> None:
+        from webapi.feishu_cards import marshal_interactive_card
+
+        message_id = message_id.strip()
+        if not message_id:
+            raise ValueError("feishu message_id empty")
+        content = marshal_interactive_card(card)
+        token = await self.tenant_access_token()
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.patch(
+                f"{_OPENAPI}/im/v1/messages/{message_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"content": content},
+            )
+            data = resp.json()
+        if int(data.get("code", -1)) != 0:
+            raise ValueError(data.get("msg") or "更新飞书卡片失败")
+
+    def approval_action_url(self, base_url: str, token: str) -> str:
+        from urllib.parse import quote
+
+        base = str(base_url or "").strip().rstrip("/")
+        token = str(token or "").strip()
+        if not base or not token:
+            return ""
+        return f"{base}/api/feishu/approval/action?token={quote(token)}"
+
+    def public_api_base(self) -> str:
+        from urllib.parse import urlparse
+
+        base = str(self.cfg.get("app_base_url") or "").strip().rstrip("/")
+        if not base:
+            return ""
+        parsed = urlparse(base)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+        return base

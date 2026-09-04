@@ -402,6 +402,9 @@ export async function streamWorkflowExecution(instanceId, handlers = {}) {
       else if (event.type === "input_required") onInputRequired?.(event.prompt || "");
       else if (event.type === "done") onDone?.(event);
       else if (event.type === "error") onError?.(event);
+      else if (event.type === "ping") {
+        /* keep SSE alive during long model calls */
+      }
     }
   }
 }

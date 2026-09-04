@@ -79,3 +79,5 @@ mysql -h <host> -u <user> -p zadig_agent < deploy/sql/clear_workflow_data.sql
 - 首次启动会根据 `auth.root_initial_*` 自动创建超级管理员（若库中尚无 root 本地账号）。
 - 若集群 Ingress/网关会校验 `Authorization: Bearer`，前端已通过 `X-Access-Token` 传递登录态（与 `mse-domain-binding` 一致）；不要改回仅使用 Bearer。
 - 生产环境请将 ConfigMap 中 `feishu.app_base_url` 设为实际访问域名（如 `https://zadig-agent.openxlab.org.cn`），并填写飞书 `app_id` / `app_secret`。
+- **飞书审批卡片**：在飞书开放平台启用机器人能力，开通 `im:message`、通讯录只读等权限；事件订阅选择 `card.action.trigger`，回调 URL 设为 `https://<你的域名>/api/feishu/card/callback`（必须 HTTPS，避免 301/302）。配置 `feishu.verification_token` 与 `feishu.encrypt_key`（若启用加密）。
+- **Agent 模型 API 与 IP 白名单**：Agent 执行时会从 Pod 内访问 `base_url`（如 free-router、OpenRouter）。若报错 `ip_not_allowed` / `proxy_forbidden` / HTTP 457，说明当前集群出口 IP 不在模型网关白名单内。处理方式：（1）向模型网关管理员申请加入集群 NAT 出口 IP；（2）改用无 IP 限制的 Agent（如 OpenRouter）；（3）在 `deploy/yamls/deployment.yaml` 为容器增加 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量，经允许网段的代理访问。可在 Pod 内执行 `curl -s https://ifconfig.me` 查看出口 IP，并在「Agent 管理」保存时由服务端探测（会发起一次最小 chat 请求）。

@@ -17,7 +17,7 @@ def get_openrouter_llm() -> ChatOpenAI:
             model=cfg["model"],
             base_url=cfg["base_url"],
             api_key=SecretStr(cfg["api_key"]),
-            streaming=False,
+            streaming=True,
             default_headers={"Accept-Encoding": "identity"},
         )
         if _llm_fingerprint is not None:

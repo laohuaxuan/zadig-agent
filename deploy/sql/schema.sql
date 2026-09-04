@@ -222,3 +222,18 @@ CREATE TABLE IF NOT EXISTS `workflow_ccs` (
   KEY `idx_cc_instance` (`instance_id`),
   KEY `idx_cc_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `workflow_feishu_cards` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `instance_id` BIGINT NOT NULL,
+  `task_id` BIGINT NOT NULL DEFAULT 0,
+  `user_id` BIGINT NOT NULL,
+  `open_message_id` VARCHAR(128) NOT NULL,
+  `open_id` VARCHAR(128) NOT NULL DEFAULT '',
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_wfc_instance` (`instance_id`),
+  KEY `idx_wfc_user` (`user_id`),
+  KEY `idx_wfc_message` (`open_message_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from webapi.applications import stream_application_execution, submit_application, submit_execution_reply, sync_application_status
+from webapi.approval_action import run_approval_action
 from webapi.approval_templates import create_template, delete_template, get_template, list_templates, update_template
 from webapi.feishu_client import FeishuClient
 from webapi.platform_auth import issue_token, parse_token, token_max_age_seconds, verify_password
@@ -38,7 +39,7 @@ from webapi.platform_users import (
     update_user_status,
     write_audit,
 )
-from webapi.workflows import approve_task, get_counts, get_instance_detail, list_tasks, reject_task, revoke_instance
+from webapi.workflows import get_counts, get_instance_detail, list_tasks, revoke_instance
 
 router = APIRouter()
 _feishu = FeishuClient()
@@ -524,8 +525,6 @@ def api_workflow_instance(instance_id: int, user: CurrentUser = Depends(get_curr
 
 @router.post("/api/workflows/instances/{instance_id}/approve")
 async def api_workflow_approve(instance_id: int, body: WorkflowActionBody, user: CurrentUser = Depends(get_current_user)) -> dict[str, Any]:
-    profile = get_user_by_id(user.user_id) or {}
-    name = profile.get("display_name") or profile.get("name") or user.username
     task_id = body.task_id
     if not task_id:
         from utils.db import query_one
@@ -542,13 +541,10 @@ async def api_workflow_approve(instance_id: int, body: WorkflowActionBody, user:
         task_id = int(pending["id"]) if pending else 0
     if not task_id:
         raise HTTPException(status_code=400, detail="无待办任务")
-    try:
-        completed = approve_task(instance_id, task_id, user.user_id, name, body.comment)
-    except (PermissionError, LookupError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if completed:
-        sync_application_status(instance_id, "completed")
-    return {"ok": True, "completed": completed}
+    outcome = run_approval_action(instance_id, task_id, user.user_id, "approve", comment=body.comment, notify_now=True)
+    if outcome.http_status != 200:
+        raise HTTPException(status_code=outcome.http_status, detail=outcome.toast_message or outcome.page_message)
+    return {"ok": True, "completed": outcome.final_approved}
 
 
 @router.get("/api/workflows/instances/{instance_id}/execute/stream")
@@ -585,8 +581,6 @@ async def api_workflow_execute_reply(
 
 @router.post("/api/workflows/instances/{instance_id}/reject")
 def api_workflow_reject(instance_id: int, body: WorkflowActionBody, user: CurrentUser = Depends(get_current_user)) -> dict[str, Any]:
-    profile = get_user_by_id(user.user_id) or {}
-    name = profile.get("display_name") or profile.get("name") or user.username
     task_id = body.task_id
     if not task_id:
         from utils.db import query_one
@@ -603,11 +597,9 @@ def api_workflow_reject(instance_id: int, body: WorkflowActionBody, user: Curren
         task_id = int(pending["id"]) if pending else 0
     if not task_id:
         raise HTTPException(status_code=400, detail="无待办任务")
-    try:
-        reject_task(instance_id, task_id, user.user_id, name, body.comment)
-    except (PermissionError, LookupError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    sync_application_status(instance_id, "rejected")
+    outcome = run_approval_action(instance_id, task_id, user.user_id, "reject", comment=body.comment, notify_now=True)
+    if outcome.http_status != 200:
+        raise HTTPException(status_code=outcome.http_status, detail=outcome.toast_message or outcome.page_message)
     return {"ok": True}
 
 
@@ -618,4 +610,5 @@ def api_workflow_revoke(instance_id: int, user: CurrentUser = Depends(get_curren
     except (PermissionError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     sync_application_status(instance_id, "revoked")
+    schedule_revoke_notifications(instance_id)
     return {"ok": True}

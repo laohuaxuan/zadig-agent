@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   approveWorkflow,
   fetchWorkflowCounts,
@@ -64,23 +65,79 @@ const FLOW_STEP_STATUS_LABEL = {
   pending: "待审批",
   upcoming: "待到达",
   rejected: "已驳回",
+  failed: "失败",
   cancelled: "已取消",
 };
 
 function flowStepStatusLabel(step) {
   if (step.name === "Agent 执行") {
+    if (step.status === "failed") return "失败";
     if (step.status === "pending") return step.action_label || "待执行";
     if (step.action_label === "执行中") return "执行中";
+    if (step.status === "done") return "已完成";
   }
   return FLOW_STEP_STATUS_LABEL[step.status] || step.status;
 }
 
 function formatAgentMeta(meta) {
   if (!meta) return "";
-  const agent = meta.agent || "zadig_bot";
-  const model = meta.model || "-";
-  const provider = meta.provider || "-";
-  return `Agent: ${agent} | Model: ${model} | Provider: ${provider}`;
+  const name = meta.name || meta.agent || "zadig_bot";
+  const parts = [`Agent: ${name}`];
+  if (meta.id) parts.push(`ID: ${meta.id}`);
+  parts.push(`Model: ${meta.model || "-"}`);
+  parts.push(`Provider: ${meta.provider || "-"}`);
+  return parts.join(" | ");
+}
+
+function resolveAgentMeta(application, executionContext, agentMetaState) {
+  return (
+    agentMetaState ||
+    application?.agent_meta ||
+    executionContext?.agent ||
+    application?.execution_context?.agent ||
+    null
+  );
+}
+
+function AgentInfoPanel({ meta }) {
+  if (!meta?.name && !meta?.agent && !meta?.model) return null;
+  const name = meta.name || meta.agent || "—";
+  return (
+    <dl className="workflow-kv workflow-agent-resources workflow-agent-info">
+      <div className="workflow-kv-row">
+        <dt>Agent</dt>
+        <dd>
+          {name}
+          {meta.is_default ? <span className="wf-tag wf-tag-default">默认</span> : null}
+        </dd>
+      </div>
+      {meta.id ? (
+        <div className="workflow-kv-row">
+          <dt>标识</dt>
+          <dd className="workflow-kv-mono">{meta.id}</dd>
+        </div>
+      ) : null}
+      <div className="workflow-kv-row">
+        <dt>模型</dt>
+        <dd>
+          {meta.model || "—"}
+          {meta.primary_model && meta.primary_model !== meta.model ? (
+            <span className="wf-muted"> · 主模型 {meta.primary_model} 不可用，已切换备用</span>
+          ) : null}
+        </dd>
+      </div>
+      <div className="workflow-kv-row">
+        <dt>提供商</dt>
+        <dd>{meta.provider || "—"}</dd>
+      </div>
+      {meta.base_url ? (
+        <div className="workflow-kv-row">
+          <dt>API</dt>
+          <dd className="workflow-kv-mono">{meta.base_url}</dd>
+        </div>
+      ) : null}
+    </dl>
+  );
 }
 
 function formatExecutionResourcesMeta(ctx) {
@@ -173,10 +230,14 @@ function WorkflowFlowSteps({ steps, initiatorName }) {
               <strong>{step.name}</strong>
               <span className="wf-flow-step-status">{flowStepStatusLabel(step)}</span>
             </div>
-            {step.status === "done" || step.status === "rejected" ? (
+            {step.status === "done" || step.status === "rejected" || step.status === "failed" ? (
               <div className="wf-flow-step-meta">
                 <span>{step.actor_name || "-"}</span>
-                {step.action_label ? <span className="wf-flow-step-action">{step.action_label}</span> : null}
+                {step.action_label ? (
+                  <span className={step.status === "failed" ? "wf-flow-step-action wf-flow-step-action-failed" : "wf-flow-step-action"}>
+                    {step.action_label}
+                  </span>
+                ) : null}
                 {step.processed_at ? <span className="wf-flow-step-time">{relativeTime(step.processed_at)}</span> : null}
               </div>
             ) : (
@@ -200,6 +261,7 @@ function WorkflowFlowSteps({ steps, initiatorName }) {
 }
 
 export default function WorkflowPanel() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeBox, setActiveBox] = useState("todo");
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
@@ -316,6 +378,15 @@ export default function WorkflowPanel() {
   );
 
   useEffect(() => {
+    const raw = Number(searchParams.get("instance") || 0);
+    if (raw > 0) {
+      setSelectedId(raw);
+      searchParams.delete("instance");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
     loadCounts().catch(() => {});
   }, [loadCounts, activeBox, search]);
 
@@ -373,7 +444,11 @@ export default function WorkflowPanel() {
     if (executing) return;
     const logText = detail?.application?.execution_log || "";
     setExecutionLog(logText);
-    setAgentMeta(detail?.application?.agent_meta || null);
+    setAgentMeta(
+      detail?.application?.agent_meta ||
+        detail?.application?.execution_context?.agent ||
+        null,
+    );
     setExecutionContext(detail?.application?.execution_context || null);
     const status = detail?.application?.flow_status || "";
     const serverAwaiting = Boolean(detail?.execution_session?.awaiting_input);
@@ -468,7 +543,11 @@ export default function WorkflowPanel() {
         },
         onError: async (event) => {
           setExecutionPhase("finished");
-          setError(event.message || "Agent 执行失败");
+          const message = event.message || "Agent 执行失败";
+          setError(message);
+          setExecutionLog((prev) =>
+            prev.includes("❌ 执行失败") ? prev : `${prev}\n❌ 执行失败：${message}\n`,
+          );
           detailCacheRef.current.delete(selectedId);
           await refreshAll(selectedId);
         },
@@ -511,7 +590,8 @@ export default function WorkflowPanel() {
   const logAwaiting = logAwaitingUserInput(executionLog || application?.execution_log || "");
   const canReply = Boolean(serverAwaitingInput || (executionPhase === "awaiting_input" && executing));
   const inputLocked = !canReply;
-  const agentMetaLine = formatAgentMeta(agentMeta || application?.agent_meta);
+  const resolvedAgentMeta = resolveAgentMeta(application, executionContext, agentMeta);
+  const agentMetaLine = formatAgentMeta(resolvedAgentMeta);
   const resourcesMetaLine = formatExecutionResourcesMeta(executionContext || application?.execution_context);
 
   return (
@@ -728,8 +808,20 @@ export default function WorkflowPanel() {
                     <p className="field-hint">
                       审批通过后，由申请人手动触发 Agent 创建项目。系统将自动选择 Skill、工作流模板和 MCP 工具；执行过程将按步骤输出。
                     </p>
+                    {resolvedAgentMeta ? (
+                      <>
+                        <h5 className="workflow-agent-section-title">Agent 配置</h5>
+                        <AgentInfoPanel meta={resolvedAgentMeta} />
+                      </>
+                    ) : null}
                     {executionContext || application?.execution_context ? (
-                      <ExecutionResourcesPanel context={executionContext || application?.execution_context} />
+                      <>
+                        <h5 className="workflow-agent-section-title">执行资源</h5>
+                        <ExecutionResourcesPanel context={executionContext || application?.execution_context} />
+                      </>
+                    ) : null}
+                    {application?.flow_status === "失败" && application?.process_message ? (
+                      <div className="banner error workflow-agent-error">{application.process_message}</div>
                     ) : null}
                     <textarea
                       ref={logRef}

@@ -840,6 +840,10 @@ th {
   gap: 14px;
 }
 
+.form-grid-align-start {
+  align-items: start;
+}
+
 .form-grid label,
 .form-section label {
   display: grid;
@@ -2780,12 +2784,50 @@ select.scroll-select[size] {
   margin-top: 4px;
 }
 
+.workflow-agent-section-title {
+  margin: 12px 0 6px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.workflow-agent-section-title:first-of-type {
+  margin-top: 0;
+}
+
+.workflow-kv-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.wf-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+.wf-tag-default {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
 .workflow-agent-resources {
   margin: 0 0 12px;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: #f8fafc;
+}
+
+.workflow-agent-info {
+  margin-bottom: 4px;
 }
 
 .workflow-agent-link {
@@ -2947,6 +2989,7 @@ select.scroll-select[size] {
 .wf-flow-step-done,
 .wf-flow-step-upcoming,
 .wf-flow-step-rejected,
+.wf-flow-step-failed,
 .wf-flow-step-cancelled {
   color: #9ca3af;
 }
@@ -2954,6 +2997,7 @@ select.scroll-select[size] {
 .wf-flow-step-done .wf-flow-step-dot,
 .wf-flow-step-upcoming .wf-flow-step-dot,
 .wf-flow-step-rejected .wf-flow-step-dot,
+.wf-flow-step-failed .wf-flow-step-dot,
 .wf-flow-step-cancelled .wf-flow-step-dot {
   border-color: #d1d5db;
   background: #f3f4f6;
@@ -2967,6 +3011,7 @@ select.scroll-select[size] {
 .wf-flow-step-done .wf-flow-step-head strong,
 .wf-flow-step-upcoming .wf-flow-step-head strong,
 .wf-flow-step-rejected .wf-flow-step-head strong,
+.wf-flow-step-failed .wf-flow-step-head strong,
 .wf-flow-step-cancelled .wf-flow-step-head strong {
   color: #6b7280;
 }
@@ -2978,12 +3023,14 @@ select.scroll-select[size] {
   color: #9ca3af;
 }
 
-.wf-flow-step-rejected .wf-flow-step-status {
+.wf-flow-step-rejected .wf-flow-step-status,
+.wf-flow-step-failed .wf-flow-step-status {
   background: #fef2f2;
   color: #b91c1c;
 }
 
 .wf-flow-step-rejected .wf-flow-step-action,
+.wf-flow-step-failed .wf-flow-step-action,
 .wf-flow-step-action-failed {
   color: #b91c1c;
 }

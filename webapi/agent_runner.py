@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
 
-from model.openrouter import get_openrouter_llm
+from utils.llm_errors import format_llm_error
 from utils.mcp import get_zadig_mcp_tools
 from webapi.agent_resources import (
     format_execution_resources_log,
@@ -56,35 +56,71 @@ def _infer_provider(base_url: str) -> str:
     return host.split(".")[0] if "." in host else host
 
 
-def get_agent_meta() -> dict[str, str]:
+def get_agent_meta() -> dict[str, Any]:
     from utils.config import openrouter_config
 
     cfg = openrouter_config()
     name = str(cfg.get("name") or "zadig_bot").strip() or "zadig_bot"
     model = str(cfg.get("model") or "").strip()
     base_url = str(cfg.get("base_url") or "").strip()
+    primary_model = str(cfg.get("primary_model") or model).strip()
     return {
+        "id": str(cfg.get("id") or "").strip(),
+        "name": name,
         "agent": name,
         "model": model,
+        "primary_model": primary_model,
         "provider": _infer_provider(base_url),
         "base_url": base_url,
+        "is_primary_model": bool(cfg.get("is_primary_model", True)),
+        "is_default": bool(cfg.get("is_default")),
     }
+
+
+def format_agent_meta_log(meta: dict[str, str] | None = None) -> str:
+    item = meta or get_agent_meta()
+    name = str(item.get("name") or item.get("agent") or "-").strip()
+    lines = [
+        "🤖 Agent 配置",
+        "=" * 60,
+        f"名称：{name}",
+    ]
+    agent_id = str(item.get("id") or "").strip()
+    if agent_id:
+        lines.append(f"标识：{agent_id}")
+    lines.append(f"模型：{item.get('model') or '-'}")
+    primary = str(item.get("primary_model") or "").strip()
+    active = str(item.get("model") or "").strip()
+    if primary and primary != active:
+        lines.append(f"主模型：{primary}（当前已切换备用模型）")
+    lines.extend(
+        [
+            f"提供商：{item.get('provider') or '-'}",
+            f"API：{item.get('base_url') or '-'}",
+        ]
+    )
+    if item.get("is_default"):
+        lines.append("默认 Agent：是")
+    lines.append("=" * 60)
+    return "\n".join(lines)
 
 
 def format_agent_meta_line(meta: dict[str, str] | None = None) -> str:
     item = meta or get_agent_meta()
-    return (
-        f"Agent: {item.get('agent') or 'zadig_bot'} | "
-        f"Model: {item.get('model') or '-'} | "
-        f"Provider: {item.get('provider') or '-'}"
-    )
+    name = str(item.get("name") or item.get("agent") or "zadig_bot").strip()
+    parts = [f"Agent: {name}"]
+    if item.get("id"):
+        parts.append(f"ID: {item['id']}")
+    parts.append(f"Model: {item.get('model') or '-'}")
+    parts.append(f"Provider: {item.get('provider') or '-'}")
+    return " | ".join(parts)
 
 
 def format_execution_footer(agent_meta: dict[str, str], execution_context: dict[str, Any] | None) -> str:
-    lines = [format_agent_meta_line(agent_meta)]
+    lines = [format_agent_meta_log(agent_meta), ""]
     if execution_context:
         lines.append(format_execution_resources_meta_line(execution_context))
-    return "\n".join(lines)
+    return "\n".join(line for line in lines if line is not None)
 
 
 def _collect_tool_calls(messages: list[Any]) -> list[dict[str, str]]:
@@ -297,16 +333,21 @@ async def run_project_create_agent(
                 )
             )
         ]
+        await _emit_log(log_fn, "正在调用模型推理...\n")
         step_offset = 0
 
         while True:
-            round_messages, step_offset, _duration = await _stream_agent_round(
-                agent,
-                conversation,
-                config,
-                log_fn=log_fn,
-                step_offset=step_offset,
-            )
+            try:
+                round_messages, step_offset, _duration = await _stream_agent_round(
+                    agent,
+                    conversation,
+                    config,
+                    log_fn=log_fn,
+                    step_offset=step_offset,
+                )
+            except Exception as exc:
+                await _emit_log(log_fn, f"\n❌ 模型调用失败：{format_llm_error(exc)}\n")
+                raise
             conversation.extend(round_messages)
             all_messages.extend(round_messages)
             last_ai = _last_ai_message(round_messages)
