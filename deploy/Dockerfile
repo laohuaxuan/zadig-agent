@@ -9,6 +9,7 @@ FROM acr-openxlab-prod-registry-vpc.cn-shanghai.cr.aliyuncs.com/public/node:18-a
 
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
+COPY README.md ./
 RUN npm ci --registry=https://registry.npmmirror.com
 
 COPY web/ ./
