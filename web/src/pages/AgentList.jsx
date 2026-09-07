@@ -109,8 +109,11 @@ export default function AgentList() {
                     <td>{row.backup_models?.length ? row.backup_models.join("、") : "—"}</td>
                     <td>{row.base_url || "—"}</td>
                     <td>{row.api_key_masked || "—"}</td>
-                    <td>
-                      <span className={`status ${row.available ? "ok" : "bad"}`}>
+                    <td className="agent-status-cell">
+                      <span
+                        className={`status ${row.available ? "ok" : "bad"}`}
+                        title={row.available ? "可用" : row.error || "不可用"}
+                      >
                         {row.available ? "可用" : row.error || "不可用"}
                       </span>
                     </td>

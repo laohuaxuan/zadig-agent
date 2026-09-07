@@ -455,6 +455,8 @@ export default function WorkflowPanel() {
     const logAwaiting = logAwaitingUserInput(logText);
     if (serverAwaiting || (status === "执行中" && logAwaiting)) {
       setExecutionPhase("awaiting_input");
+    } else if (status === "执行中") {
+      setExecutionPhase("running");
     } else if (status === "已完成" || status === "失败") {
       setExecutionPhase("finished");
     } else if (!executing) {
@@ -585,7 +587,9 @@ export default function WorkflowPanel() {
     application &&
       (workflowCompleted || executing || application.execution_log || application.flow_status === "执行中"),
   );
-  const canExecute = Boolean(detail?.can_execute && !executing);
+  const serverExecuting = application?.flow_status === "执行中";
+  const canExecute = Boolean(detail?.can_execute && !executing && !serverExecuting);
+  const isRunning = executing || serverExecuting;
   const serverAwaitingInput = Boolean(detail?.execution_session?.awaiting_input);
   const logAwaiting = logAwaitingUserInput(executionLog || application?.execution_log || "");
   const canReply = Boolean(serverAwaitingInput || (executionPhase === "awaiting_input" && executing));
@@ -803,7 +807,7 @@ export default function WorkflowPanel() {
                           {application?.flow_status === "失败" ? "重新执行" : "开始执行"}
                         </button>
                       ) : null}
-                      {executing ? <span className="wf-muted">执行中...</span> : null}
+                      {isRunning ? <span className="wf-muted">执行中...</span> : null}
                     </div>
                     <p className="field-hint">
                       审批通过后，由申请人手动触发 Agent 创建项目。系统将自动选择 Skill、工作流模板和 MCP 工具；执行过程将按步骤输出。
@@ -829,7 +833,13 @@ export default function WorkflowPanel() {
                       readOnly
                       rows={14}
                       value={executionLog}
-                      placeholder={canExecute ? "点击「开始执行」后，这里将显示 Agent 执行过程与结果" : "暂无执行日志"}
+                      placeholder={
+                        serverExecuting && !executionLog
+                          ? "Agent 执行中，日志将自动刷新…"
+                          : canExecute
+                            ? "点击「开始执行」后，这里将显示 Agent 执行过程与结果"
+                            : "暂无执行日志"
+                      }
                     />
                     {agentMetaLine || resourcesMetaLine ? (
                       <div className="workflow-agent-meta">

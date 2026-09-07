@@ -107,7 +107,7 @@ def _model_matches(model: str, known_ids: set[str]) -> bool:
     return any(model == mid or mid.endswith(f"/{model}") or mid.endswith(model) for mid in known_ids)
 
 
-def probe_model(base_url: str, api_key: str, model: str) -> tuple[bool, str]:
+def probe_model(base_url: str, api_key: str, model: str, *, fresh: bool = False) -> tuple[bool, str]:
     text = str(model or "").strip()
     url = str(base_url or "").strip().rstrip("/")
     key = str(api_key or "").strip()
@@ -118,10 +118,11 @@ def probe_model(base_url: str, api_key: str, model: str) -> tuple[bool, str]:
     if not url:
         return False, "未配置 base_url"
     cache_key = _model_probe_key(url, key, text)
-    cached = _probe_cache.get(cache_key)
     now = time.monotonic()
-    if cached and now - cached[0] < _PROBE_TTL:
-        return cached[1], cached[2]
+    if not fresh:
+        cached = _probe_cache.get(cache_key)
+        if cached and now - cached[0] < _PROBE_TTL:
+            return cached[1], cached[2]
     try:
         resp = httpx.post(
             f"{url}/chat/completions",
@@ -161,6 +162,67 @@ def probe_agent(item: dict[str, Any]) -> tuple[bool, str]:
         if ok:
             return True, f"主模型 {primary or '—'} 不可用，备用 {backup} 可用"
     return False, error if primary else "未配置 model"
+
+
+def build_probe_item(payload: dict[str, Any], *, agent_id: str = "") -> dict[str, Any]:
+    api_key = str(payload.get("api_key") or "").strip()
+    base_url = str(payload.get("base_url") or "").strip().rstrip("/")
+    current: dict[str, Any] | None = None
+    if agent_id:
+        row = query_one("SELECT * FROM agents WHERE id = %s", (agent_id,))
+        if row is None:
+            raise KeyError(f"Agent {agent_id} 不存在")
+        current = _row_agent(row)
+    if not api_key and current:
+        api_key = str(current.get("api_key") or "").strip()
+    if not base_url and current:
+        base_url = str(current.get("base_url") or "").strip().rstrip("/")
+    if _should_update_models(payload) or not current:
+        models = _normalize_agent_models(payload, current)
+    elif current:
+        models = current.get("models") or _parse_models_json(None, str(current.get("model") or ""))
+    else:
+        models = _normalize_agent_models(payload)
+    if not api_key:
+        raise ValueError("请填写 API Key")
+    if not base_url:
+        raise ValueError("请填写 base_url")
+    primary = str(models.get("primary") or "").strip()
+    if not primary:
+        raise ValueError("请填写主模型")
+    return {
+        "id": agent_id or "probe",
+        "name": str(payload.get("name") or (current or {}).get("name") or "probe"),
+        "api_key": api_key,
+        "base_url": base_url,
+        "model": primary,
+        "models": models,
+    }
+
+
+def test_agent_config(payload: dict[str, Any], *, agent_id: str = "") -> dict[str, Any]:
+    item = build_probe_item(payload, agent_id=agent_id)
+    models = item.get("models") or {}
+    primary = str(models.get("primary") or item.get("model") or "").strip()
+    backups = [str(model).strip() for model in models.get("backups") or [] if str(model).strip()]
+    base_url = str(item.get("base_url") or "").strip().rstrip("/")
+    api_key = str(item.get("api_key") or "").strip()
+    last_error = "不可用"
+    if primary:
+        ok, error = probe_model(base_url, api_key, primary, fresh=True)
+        if ok:
+            return {"available": True, "message": f"主模型 {primary} 可用", "active_model": primary}
+        last_error = error
+    for backup in backups:
+        ok, error = probe_model(base_url, api_key, backup, fresh=True)
+        if ok:
+            return {
+                "available": True,
+                "message": f"主模型 {primary or '—'} 不可用，备用 {backup} 可用",
+                "active_model": backup,
+            }
+        last_error = error
+    return {"available": False, "message": last_error, "active_model": ""}
 
 
 def resolve_agent_models(item: dict[str, Any]) -> dict[str, Any]:

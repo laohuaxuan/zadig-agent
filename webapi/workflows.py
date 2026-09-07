@@ -22,7 +22,7 @@ TASK_APPROVED = "approved"
 TASK_REJECTED = "rejected"
 TASK_CANCELLED = "cancelled"
 
-_EXECUTABLE_APP_STATUSES = ("待执行", "已通过", "失败")
+_EXECUTABLE_APP_STATUSES = ("待执行", "已通过", "执行中")
 _LIST_SELECT = """
     t.id AS task_id, i.id AS instance_id, i.serial_no, i.title, i.workflow_type,
     i.status, i.summary, i.initiator_name, t.assignee_name, t.processed_at,
@@ -770,6 +770,9 @@ def build_flow_steps(
 
 
 def get_instance_detail(instance_id: int, user_id: int) -> dict[str, Any]:
+    from webapi.applications import reconcile_stale_execution
+
+    reconcile_stale_execution(instance_id)
     instance = _get_instance(instance_id)
     records = query(
         "SELECT * FROM workflow_records WHERE instance_id = %s ORDER BY id ASC",

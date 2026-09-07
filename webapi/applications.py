@@ -143,7 +143,7 @@ def can_execute_application(
         return False
     status = str(app.get("approval_status") or "")
     if status == "执行中":
-        return instance_id > 0 and instance_id not in _execution_input_queues
+        return False
     return status in _EXECUTABLE_STATUSES
 
 
@@ -286,6 +286,28 @@ def _mark_execution_started(app_id: int) -> None:
     )
 
 
+def reconcile_stale_execution(instance_id: int) -> None:
+    """无活跃执行会话但状态仍为「执行中」时，视为中断并标记失败。"""
+    if instance_id in _execution_input_queues:
+        return
+    row = query_one(
+        "SELECT id, approval_status FROM project_applications WHERE workflow_instance_id = %s",
+        (instance_id,),
+    )
+    if not row or str(row.get("approval_status") or "") != "执行中":
+        return
+    app_id = int(row["id"])
+    _append_execution_log(app_id, "\n❌ 执行已中断，请重新执行\n")
+    execute(
+        """
+        UPDATE project_applications
+        SET approval_status = %s, process_message = %s, updated_at = %s
+        WHERE id = %s
+        """,
+        ("失败", "执行已中断，请重新执行", _now(), app_id),
+    )
+
+
 def _validate_execute_request(instance_id: int, user_id: int) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     instance = query_one("SELECT * FROM workflow_instances WHERE id = %s", (instance_id,))
     if not instance:
@@ -299,9 +321,9 @@ def _validate_execute_request(instance_id: int, user_id: int) -> tuple[dict[str,
     if int(app["initiator_id"]) != user_id:
         raise PermissionError("仅申请人可执行 Agent")
     status = str(app.get("approval_status") or "")
-    if status == "执行中" and instance_id in _execution_input_queues:
+    if status == "执行中":
         raise ValueError("Agent 正在执行中，请稍候")
-    if status not in _EXECUTABLE_STATUSES and status != "执行中":
+    if status not in _EXECUTABLE_STATUSES:
         raise ValueError(f"当前状态「{status}」不可执行")
     return instance, app_row, app
 

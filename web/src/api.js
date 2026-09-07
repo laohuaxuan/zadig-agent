@@ -529,6 +529,14 @@ export function createAgent(body) {
   });
 }
 
+export function testAgent(body) {
+  return request("/api/agents/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export function updateAgent(id, body) {
   return request(`/api/agents/${encodeURIComponent(id)}`, {
     method: "PUT",

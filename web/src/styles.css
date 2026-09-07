@@ -1107,6 +1107,17 @@ th {
   color: var(--danger);
 }
 
+.agent-status-cell {
+  max-width: 140px;
+}
+
+.agent-status-cell .status {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .row-actions {
   display: flex;
   gap: 8px;

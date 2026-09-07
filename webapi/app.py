@@ -67,6 +67,7 @@ from webapi.settings import (
     save_zadig,
     set_active_zadig,
     set_default_agent,
+    test_agent_config,
     update_agent,
     update_zadig_instance,
 )
@@ -241,6 +242,10 @@ class AgentBody(BaseModel):
     backup_models: list[str] = []
     base_url: str = ""
     is_default: bool = False
+
+
+class AgentTestBody(AgentBody):
+    agent_id: str = ""
 
 
 def _agent_payload(body: AgentBody) -> dict[str, Any]:
@@ -902,6 +907,20 @@ def api_get_agent(agent_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
     ok, error = probe_agent(item)
     return {"ok": True, "item": public_agent(item, default_id, ok, error)}
+
+
+@app.post("/api/agents/test")
+def api_test_agent(request: Request, body: AgentTestBody) -> dict[str, Any]:
+    user = _platform_user(request)
+    if not can_manage_agents(str(user.get("role") or "")):
+        raise HTTPException(status_code=403, detail="无权管理 Agent")
+    try:
+        result = test_agent_config(_agent_payload(body), agent_id=str(body.agent_id or "").strip())
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
 
 
 @app.post("/api/agents")

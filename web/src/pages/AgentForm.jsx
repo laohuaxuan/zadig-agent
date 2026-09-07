@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { createAgent, fetchAgent, updateAgent } from "../api.js";
+import { createAgent, fetchAgent, testAgent, updateAgent } from "../api.js";
 
 const EMPTY = {
   name: "",
@@ -18,6 +18,8 @@ export default function AgentForm() {
   const [form, setForm] = useState(EMPTY);
   const [masked, setMasked] = useState("");
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -60,15 +62,35 @@ export default function AgentForm() {
     }));
   }
 
+  function buildPayload() {
+    return {
+      ...form,
+      model: form.primary_model,
+      backup_models: form.backup_models.map((item) => item.trim()).filter(Boolean),
+      agent_id: editing ? agentId : "",
+    };
+  }
+
+  async function onTest() {
+    setTesting(true);
+    setTestResult(null);
+    setError("");
+    try {
+      const data = await testAgent(buildPayload());
+      setTestResult(data);
+    } catch (err) {
+      setTestResult({ available: false, message: err.message });
+    } finally {
+      setTesting(false);
+    }
+  }
+
   async function onSubmit(event) {
     event.preventDefault();
     setSaving(true);
     setError("");
-    const payload = {
-      ...form,
-      model: form.primary_model,
-      backup_models: form.backup_models.map((item) => item.trim()).filter(Boolean),
-    };
+    const payload = buildPayload();
+    delete payload.agent_id;
     try {
       if (editing) {
         await updateAgent(agentId, payload);
@@ -99,6 +121,13 @@ export default function AgentForm() {
       {error ? (
         <div className="banner error" role="alert">
           {error}
+        </div>
+      ) : null}
+      {testResult ? (
+        <div className={`banner ${testResult.available ? "success" : "error"}`} role="status">
+          {testResult.available ? "测试通过：" : "测试失败："}
+          {testResult.message || (testResult.available ? "Agent 可用" : "Agent 不可用")}
+          {testResult.active_model ? `（${testResult.active_model}）` : ""}
         </div>
       ) : null}
       <form className="form-card skill-detail-form" onSubmit={onSubmit}>
@@ -170,7 +199,10 @@ export default function AgentForm() {
           设为默认 Agent
         </label>
         <div className="form-actions">
-          <button type="submit" className="primary-btn" disabled={saving}>
+          <button type="button" className="config-btn" disabled={testing || saving} onClick={onTest}>
+            {testing ? "测试中…" : "测试连接"}
+          </button>
+          <button type="submit" className="primary-btn" disabled={saving || testing}>
             {saving ? "保存中…" : "保存"}
           </button>
         </div>
