@@ -125,6 +125,17 @@ def format_execution_footer(agent_meta: dict[str, str], execution_context: dict[
     return "\n".join(line for line in lines if line is not None)
 
 
+def _tool_message_success(content: str) -> bool:
+    body = str(content or "").lower()
+    if '"ok": false' in body or '"ok":false' in body:
+        if any(token in body for token in ("already exists", "已存在", "相同的构建名称存在")):
+            return True
+        return False
+    if "error" in body[:120] and "already exists" not in body:
+        return False
+    return True
+
+
 def _collect_tool_calls(messages: list[Any]) -> list[dict[str, str]]:
     calls: list[dict[str, str]] = []
     for msg in messages:
@@ -134,9 +145,15 @@ def _collect_tool_calls(messages: list[Any]) -> list[dict[str, str]]:
         elif isinstance(msg, ToolMessage):
             name = str(getattr(msg, "name", "") or "")
             if calls and calls[-1]["name"] == name and calls[-1]["status"] == "called":
-                calls[-1]["status"] = "ok" if "error" not in str(msg.content).lower()[:80] else "error"
+                calls[-1]["status"] = "ok" if _tool_message_success(str(msg.content)) else "error"
     return [item for item in calls if item["name"]]
 
+
+class AgentExecutionCancelled(Exception):
+    """用户主动终止 Agent 执行。"""
+
+
+_CANCEL_REPLY_TOKENS = frozenset({"退出", "cancel", "终止", "停止", "abort", "quit", "stop", "exit"})
 
 _MAX_PLAN_CONTINUE_ROUNDS = 6
 
@@ -157,12 +174,23 @@ def _required_tools_for_plan(payload: dict[str, Any], plan: dict[str, Any]) -> l
     if app_type == "add_environment":
         return ["create_helm_environment"]
     if app_type == "add_service":
-        return [
-            "create_helm_service_from_template",
-            "add_helm_services",
-            "create_build",
-            "create_workflow",
-        ]
+        agent = plan.get("agent") or {}
+        deploy_mode = str(agent.get("deploy_mode") or "test")
+        tools: list[str] = []
+        if not agent.get("env_exists") and agent.get("helm_environment"):
+            tools.append("create_helm_environment")
+        if deploy_mode == "production":
+            if not agent.get("production_service_exists"):
+                tools.append("create_helm_service_from_template")
+            tools.extend(["add_helm_services", "create_workflow"])
+            return tools
+        if not agent.get("service_exists"):
+            tools.append("create_helm_service_from_template")
+        tools.append("add_helm_services")
+        if not agent.get("build_exists"):
+            tools.append("create_build")
+        tools.append("create_workflow")
+        return tools
     agent = plan.get("agent") or {}
     tools = ["create_helm_project", "create_build", "create_workflow"]
     if agent.get("helm_env_service"):
@@ -267,6 +295,18 @@ def _confirmation_prompt(msg: AIMessage) -> str:
     return content or "请确认是否继续执行。"
 
 
+def _raise_if_cancelled(cancel_fn: Callable[[], bool] | None) -> None:
+    if cancel_fn and cancel_fn():
+        raise AgentExecutionCancelled("用户终止执行")
+
+
+def _normalize_user_reply(reply: str) -> str:
+    text = str(reply or "").strip()
+    if text == "__CANCEL__" or text.lower() in _CANCEL_REPLY_TOKENS:
+        raise AgentExecutionCancelled("用户终止执行")
+    return text
+
+
 def _last_ai_message(messages: list[Any]) -> AIMessage | None:
     for msg in reversed(messages):
         if isinstance(msg, AIMessage):
@@ -338,6 +378,7 @@ async def run_project_create_agent(
     *,
     log_fn: LogCallback | None = None,
     input_fn: InputCallback | None = None,
+    cancel_fn: Callable[[], bool] | None = None,
     thread_id: str | None = None,
     resume: bool = False,
 ) -> dict[str, Any]:
@@ -433,7 +474,7 @@ async def run_project_create_agent(
                 await _emit_log(log_fn, f"\n⏸ 恢复会话，等待用户确认：\n{prompt}\n")
                 if not input_fn:
                     raise ValueError("Agent 需要用户确认，但未提供交互通道")
-                reply = str(await input_fn(prompt)).strip()
+                reply = _normalize_user_reply(str(await input_fn(prompt)).strip())
                 if not reply:
                     raise ValueError("用户确认内容不能为空")
                 await _emit_log(log_fn, f"👤 用户：{reply}\n")
@@ -447,6 +488,7 @@ async def run_project_create_agent(
 
         plan_continue_rounds = 0
         while True:
+            _raise_if_cancelled(cancel_fn)
             try:
                 round_messages, step_offset, _duration = await _stream_agent_round(
                     agent,
@@ -456,6 +498,8 @@ async def run_project_create_agent(
                     step_offset=step_offset,
                     resume_from_checkpoint=resume_from_checkpoint,
                 )
+            except AgentExecutionCancelled:
+                raise
             except Exception as exc:
                 await _emit_log(log_fn, f"\n❌ 模型调用失败：{format_llm_error(exc)}\n")
                 raise
@@ -468,7 +512,7 @@ async def run_project_create_agent(
                 await _emit_log(log_fn, f"\n⏸ 等待用户确认：\n{prompt}\n")
                 if not input_fn:
                     raise ValueError("Agent 需要用户确认，但未提供交互通道")
-                reply = str(await input_fn(prompt)).strip()
+                reply = _normalize_user_reply(str(await input_fn(prompt)).strip())
                 if not reply:
                     raise ValueError("用户确认内容不能为空")
                 await _emit_log(log_fn, f"👤 用户：{reply}\n")

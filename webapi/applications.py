@@ -11,6 +11,7 @@ from tools.file_saver import clear_thread_checkpoints, has_checkpoint, resolve_c
 from utils.db import _now, execute, query, query_one
 from utils.llm_errors import format_llm_error
 from webapi.agent_runner import (
+    AgentExecutionCancelled,
     build_project_url,
     format_agent_meta_line,
     format_execution_footer,
@@ -29,7 +30,7 @@ from webapi.workflows import STATUS_COMPLETED, STATUS_REJECTED, STATUS_REVOKED, 
 from webapi.workflow_notify import schedule_submit_notifications
 from webapi.zadig_meta import build_application_plan
 
-_EXECUTABLE_STATUSES = {"待执行", "已通过", "失败"}
+_EXECUTABLE_STATUSES = {"待执行", "已通过", "失败", "已取消"}
 _ACTIVE_DUPLICATE_STATUSES = ("待审批", "待执行", "执行中")
 _execution_input_queues: dict[int, asyncio.Queue[str]] = {}
 
@@ -39,6 +40,7 @@ class _ExecutionSession:
     task: asyncio.Task[Any]
     event_queues: list[asyncio.Queue[tuple[str, Any]]] = field(default_factory=list)
     input_queue: asyncio.Queue[str] | None = None
+    cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 _execution_sessions: dict[int, _ExecutionSession] = {}
@@ -474,6 +476,23 @@ async def submit_execution_reply(instance_id: int, user_id: int, message: str) -
     await queue.put(text)
 
 
+async def cancel_application_execution(instance_id: int, user_id: int) -> None:
+    app = get_application_by_instance(instance_id)
+    if not app:
+        raise LookupError("未找到关联的项目申请")
+    if int(app["initiator_id"]) != user_id:
+        raise PermissionError("仅申请人可终止执行")
+    session = _execution_sessions.get(instance_id)
+    if not session or session.task.done():
+        raise ValueError("当前没有进行中的 Agent 执行")
+    session.cancel_event.set()
+    if session.input_queue is not None:
+        try:
+            session.input_queue.put_nowait("__CANCEL__")
+        except asyncio.QueueFull:
+            pass
+
+
 def _finalize_execution_success(
     app_id: int,
     *,
@@ -513,6 +532,21 @@ def _finalize_execution_error(app_id: int, err: str) -> None:
         WHERE id = %s
         """,
         ("失败", message, _now(), app_id),
+    )
+    if row and row.get("workflow_instance_id"):
+        bump_initiator_notify(int(row["workflow_instance_id"]))
+
+
+def _finalize_execution_cancelled(app_id: int, message: str = "用户终止执行") -> None:
+    row = query_one("SELECT workflow_instance_id FROM project_applications WHERE id = %s", (app_id,))
+    _append_execution_log(app_id, f"\n⏹ 执行已终止：{message}\n")
+    execute(
+        """
+        UPDATE project_applications
+        SET approval_status = %s, process_message = %s, updated_at = %s
+        WHERE id = %s
+        """,
+        ("已取消", message, _now(), app_id),
     )
     if row and row.get("workflow_instance_id"):
         bump_initiator_notify(int(row["workflow_instance_id"]))
@@ -580,6 +614,11 @@ async def _attach_execution_stream(
                     yield {"type": "log", "text": f"\n❌ 执行失败：{err}\n"}
                     yield {"type": "error", "message": err, "flow_status": "失败"}
                     break
+                elif kind == "cancelled":
+                    message = str(payload_item or "用户终止执行")
+                    yield {"type": "log", "text": f"\n⏹ 执行已终止：{message}\n"}
+                    yield {"type": "cancelled", "message": message, "flow_status": "已取消"}
+                    break
         finally:
             if subscriber in existing.event_queues:
                 existing.event_queues.remove(subscriber)
@@ -628,7 +667,22 @@ async def _attach_execution_stream(
     async def input_fn(prompt: str) -> str:
         await event_queue.put(("input_required", prompt))
         await _broadcast_event(instance_id, "input_required", prompt)
-        return await input_queue.get()
+        session = _execution_sessions.get(instance_id)
+        cancel_event = session.cancel_event if session else None
+        get_task = asyncio.create_task(input_queue.get())
+        if cancel_event:
+            cancel_task = asyncio.create_task(cancel_event.wait())
+            done, pending = await asyncio.wait({get_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            if cancel_task in done:
+                raise AgentExecutionCancelled("用户终止执行")
+            return get_task.result()
+        return await get_task
+
+    def cancel_fn() -> bool:
+        session = _execution_sessions.get(instance_id)
+        return bool(session and session.cancel_event.is_set())
 
     async def runner() -> None:
         try:
@@ -636,6 +690,7 @@ async def _attach_execution_stream(
                 payload,
                 log_fn=log_fn,
                 input_fn=input_fn,
+                cancel_fn=cancel_fn,
                 thread_id=thread_id,
                 resume=resume,
             )
@@ -660,6 +715,11 @@ async def _attach_execution_stream(
             }
             await event_queue.put(("done", payload_done))
             await _broadcast_event(instance_id, "done", payload_done)
+        except AgentExecutionCancelled as exc:
+            message = str(exc).strip() or "用户终止执行"
+            _finalize_execution_cancelled(app_id, message)
+            await event_queue.put(("cancelled", message))
+            await _broadcast_event(instance_id, "cancelled", message)
         except Exception as exc:
             err = str(exc).strip() or repr(exc)
             _finalize_execution_error(app_id, err)
@@ -670,7 +730,12 @@ async def _attach_execution_stream(
             _execution_sessions.pop(instance_id, None)
 
     task = asyncio.create_task(runner())
-    _execution_sessions[instance_id] = _ExecutionSession(task=task, event_queues=[event_queue], input_queue=input_queue)
+    _execution_sessions[instance_id] = _ExecutionSession(
+        task=task,
+        event_queues=[event_queue],
+        input_queue=input_queue,
+        cancel_event=asyncio.Event(),
+    )
 
     yield {
         "type": "meta",
@@ -716,6 +781,11 @@ async def _attach_execution_stream(
                 err = str(payload_item)
                 yield {"type": "log", "text": f"\n❌ 执行失败：{err}\n"}
                 yield {"type": "error", "message": err, "flow_status": "失败"}
+                break
+            if kind == "cancelled":
+                message = str(payload_item or "用户终止执行")
+                yield {"type": "log", "text": f"\n⏹ 执行已终止：{message}\n"}
+                yield {"type": "cancelled", "message": message, "flow_status": "已取消"}
                 break
     finally:
         session = _execution_sessions.get(instance_id)

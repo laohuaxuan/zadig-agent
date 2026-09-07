@@ -395,7 +395,7 @@ export function revokeWorkflow(id) {
 }
 
 export async function streamWorkflowExecution(instanceId, handlers = {}) {
-  const { onLog, onDone, onError, onInputRequired, onMeta, signal, resume = false } = handlers;
+  const { onLog, onDone, onError, onCancelled, onInputRequired, onMeta, signal, resume = false } = handlers;
   const query = resume ? "?resume=1" : "";
   const resp = await fetch(`/api/workflows/instances/${instanceId}/execute/stream${query}`, {
     headers: withAuthHeaders(),
@@ -430,11 +430,16 @@ export async function streamWorkflowExecution(instanceId, handlers = {}) {
       else if (event.type === "input_required") onInputRequired?.(event.prompt || "");
       else if (event.type === "done") onDone?.(event);
       else if (event.type === "error") onError?.(event);
+      else if (event.type === "cancelled") onCancelled?.(event);
       else if (event.type === "ping") {
         /* keep SSE alive during long model calls */
       }
     }
   }
+}
+
+export function cancelWorkflowExecution(instanceId) {
+  return request(`/api/workflows/instances/${instanceId}/execute/cancel`, { method: "POST" });
 }
 
 export function replyWorkflowExecution(instanceId, message) {

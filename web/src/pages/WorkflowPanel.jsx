@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   approveWorkflow,
+  cancelWorkflowExecution,
   fetchWorkflowCounts,
   fetchWorkflowInstance,
   fetchWorkflowTasks,
@@ -33,6 +34,7 @@ const STATUS_CLASS = {
   awaiting_execution: "wf-status-pending",
   executing: "wf-status-pending",
   execution_failed: "wf-status-rejected",
+  execution_cancelled: "wf-status-cancelled",
 };
 
 function workflowStatusClass(item) {
@@ -287,6 +289,7 @@ export default function WorkflowPanel() {
   const detailCacheRef = useRef(new Map());
   const detailRequestRef = useRef(0);
   const autoResumeAttemptRef = useRef(null);
+  const executeAbortRef = useRef(null);
   const [error, setError] = useState("");
   const [detailRefreshing, setDetailRefreshing] = useState(false);
 
@@ -534,6 +537,9 @@ export default function WorkflowPanel() {
   async function runExecute(options = {}) {
     const resume = Boolean(options.resume);
     if (!selectedId || executing) return;
+    executeAbortRef.current?.abort();
+    const controller = new AbortController();
+    executeAbortRef.current = controller;
     setExecuting(true);
     setExecutionPhase("running");
     setError("");
@@ -548,6 +554,7 @@ export default function WorkflowPanel() {
         selectedId,
         {
           resume,
+          signal: controller.signal,
           onMeta: (event) => {
             if (event?.agent_meta) setAgentMeta(event.agent_meta);
             if (event?.execution_context) setExecutionContext(event.execution_context);
@@ -582,13 +589,49 @@ export default function WorkflowPanel() {
             detailCacheRef.current.delete(selectedId);
             await refreshAll(selectedId);
           },
+          onCancelled: async (event) => {
+            setExecutionPhase("finished");
+            const message = event.message || "用户终止执行";
+            setExecutionLog((prev) =>
+              prev.includes("执行已终止") ? prev : `${prev}\n⏹ 执行已终止：${message}\n`,
+            );
+            detailCacheRef.current.delete(selectedId);
+            await refreshAll(selectedId);
+          },
         },
       );
     } catch (err) {
+      if (controller.signal.aborted) {
+        setExecutionPhase("finished");
+        detailCacheRef.current.delete(selectedId);
+        await refreshAll(selectedId);
+      } else {
+        setExecutionPhase("finished");
+        setError(err.message);
+        detailCacheRef.current.delete(selectedId);
+        await refreshAll(selectedId);
+      }
+    } finally {
+      if (executeAbortRef.current === controller) {
+        executeAbortRef.current = null;
+      }
+      setExecuting(false);
+    }
+  }
+
+  async function runCancelExecution() {
+    if (!selectedId || !isRunning) return;
+    if (!window.confirm("确认终止当前 Agent 执行？")) return;
+    setError("");
+    try {
+      executeAbortRef.current?.abort();
+      await cancelWorkflowExecution(selectedId);
       setExecutionPhase("finished");
-      setError(err.message);
+      setExecutionLog((prev) => `${prev}\n⏹ 正在终止 Agent 执行...\n`);
       detailCacheRef.current.delete(selectedId);
       await refreshAll(selectedId);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setExecuting(false);
     }
@@ -845,6 +888,11 @@ export default function WorkflowPanel() {
                       {canResume ? (
                         <button type="button" className="primary-btn" disabled={executing} onClick={() => runExecute({ resume: true })}>
                           恢复连接
+                        </button>
+                      ) : null}
+                      {isRunning ? (
+                        <button type="button" className="config-btn danger" disabled={acting} onClick={runCancelExecution}>
+                          终止执行
                         </button>
                       ) : null}
                       {isRunning ? <span className="wf-muted">执行中...</span> : null}

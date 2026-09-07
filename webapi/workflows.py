@@ -125,6 +125,8 @@ def _display_status_key(instance_status: str, application_status: str = "", *, h
             return "executing"
         if app_status == "失败":
             return "execution_failed"
+        if app_status == "已取消":
+            return "execution_cancelled"
     return instance_status
 
 
@@ -136,6 +138,8 @@ def _display_status_label(instance_status: str, application_status: str = "", *,
         return "执行中"
     if key == "execution_failed":
         return "失败"
+    if key == "execution_cancelled":
+        return "已取消"
     return _status_label(instance_status)
 
 
@@ -822,6 +826,10 @@ def build_flow_steps(
         agent_step["status"] = "failed"
         agent_step["actor_name"] = str(instance.get("initiator_name") or "申请人")
         agent_step["action_label"] = "执行失败"
+    elif app_status == "已取消":
+        agent_step["status"] = "cancelled"
+        agent_step["actor_name"] = str(instance.get("initiator_name") or "申请人")
+        agent_step["action_label"] = "已终止"
     elif status == STATUS_COMPLETED and app_status in {"待执行", "已通过", ""}:
         agent_step["status"] = "pending"
         agent_step["action_label"] = "待执行"

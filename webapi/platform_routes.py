@@ -9,7 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from webapi.applications import stream_application_execution, submit_application, submit_execution_reply, sync_application_status
+from webapi.applications import (
+    cancel_application_execution,
+    stream_application_execution,
+    submit_application,
+    submit_execution_reply,
+    sync_application_status,
+)
 from webapi.approval_action import run_approval_action
 from webapi.approval_templates import create_template, delete_template, get_template, list_templates, update_template
 from webapi.feishu_client import FeishuClient
@@ -578,6 +584,15 @@ async def api_workflow_execute_reply(
 ) -> dict[str, Any]:
     try:
         await submit_execution_reply(instance_id, user.user_id, body.message)
+    except (LookupError, PermissionError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+@router.post("/api/workflows/instances/{instance_id}/execute/cancel")
+async def api_workflow_execute_cancel(instance_id: int, user: CurrentUser = Depends(get_current_user)) -> dict[str, Any]:
+    try:
+        await cancel_application_execution(instance_id, user.user_id)
     except (LookupError, PermissionError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True}

@@ -473,6 +473,33 @@ def service_exists_in_project(project_key: str, service_name: str) -> bool:
     return any(name.lower() == target for name in list_project_service_names(project_key))
 
 
+def list_helm_service_names(project_key: str, *, production: bool = False) -> list[str]:
+    key = str(project_key or "").strip()
+    if not key:
+        return []
+    root = "/openapi/service/yaml/production/services" if production else "/openapi/service/yaml/services"
+    try:
+        data = zadig_request("GET", root, params={"projectKey": key})
+    except Exception:
+        return []
+    rows = data if isinstance(data, list) else (data.get("services") or data.get("items") or [])
+    names: list[str] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("service_name") or row.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def helm_service_exists_in_project(project_key: str, service_name: str, *, production: bool = False) -> bool:
+    target = str(service_name or "").strip().lower()
+    if not target:
+        return False
+    return any(name.lower() == target for name in list_helm_service_names(project_key, production=production))
+
+
 def _extract_service_names_from_env_payload(data: Any) -> list[str]:
     names: list[str] = []
     if not isinstance(data, dict):
@@ -775,19 +802,20 @@ def _init_helm_service_row(service_row: dict[str, Any]) -> dict[str, Any]:
 
 def _build_helm_env_service(data: dict[str, Any], service_row: dict[str, Any]) -> dict[str, Any] | None:
     imported = service_row.get("import_values_from_git")
-    if not imported:
-        return None
-    return {
+    payload: dict[str, Any] = {
         "project_key": data["project_key"],
         "env_name": data["environment"],
+        "production": bool(data.get("environment_production", False)),
         "services": [
             {
                 "service_name": data["service_name"],
                 "deploy_strategy": "deploy",
-                "import_values_from_git": imported,
             }
         ],
     }
+    if imported:
+        payload["services"][0]["import_values_from_git"] = imported
+    return payload
 
 
 def build_project_plan(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1041,29 +1069,39 @@ def _validate_add_service_input(payload: dict[str, Any]) -> dict[str, Any]:
 def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
     data = _validate_add_service_input(payload)
     service_row = _build_service_row(data)
+    production = bool(data.get("environment_production", False))
+    deploy_mode = "production" if production else "test"
+    service_exists = service_exists_in_project(data["project_key"], data["service_name"])
+    production_service_exists = helm_service_exists_in_project(
+        data["project_key"],
+        data["service_name"],
+        production=True,
+    ) if production else False
+    build_info = _resolve_build_for_service(data["project_key"], data["service_name"])
+    build_exists = build_info is not None
+    build_name = str((build_info or {}).get("build_name") or data["build_name"]).strip()
     build_parameters = _normalize_build_parameters(data["build_variables"])
     helm_service: dict[str, Any] = {
         "project_key": data["project_key"],
         "service_name": data["service_name"],
         "template_name": data["template_name"],
-        "production": False,
+        "production": production,
         "auto_sync": False,
     }
     if service_row.get("values_yaml"):
         helm_service["values_yaml"] = service_row["values_yaml"]
 
     env_name = data["environment"]
-    helm_env_service = _build_helm_env_service(data, service_row)
-    if not helm_env_service:
-        helm_env_service = {
-            "project_key": data["project_key"],
-            "env_name": env_name,
-            "services": [{"service_name": data["service_name"], "deploy_strategy": "deploy"}],
-        }
+    helm_env_service = _build_helm_env_service(data, service_row) or {
+        "project_key": data["project_key"],
+        "env_name": env_name,
+        "production": production,
+        "services": [{"service_name": data["service_name"], "deploy_strategy": "deploy"}],
+    }
 
     build = {
         "project_key": data["project_key"],
-        "name": data["build_name"],
+        "name": build_name,
         "infrastructure": "kubernetes",
         "build_os": "ubuntu 20.04",
         "script_type": "shell",
@@ -1090,7 +1128,6 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
         "parameters": build_parameters,
     }
     registry_id = _resolve_default_registry_id()
-    production = bool(data.get("environment_production", False))
     existing_envs = list_project_environments(data["project_key"], production=production)
     env_exists = any(item["env_name"] == env_name for item in existing_envs)
     workflow = {
@@ -1099,18 +1136,24 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
         "display_name": data["workflow_name"],
         "registry_id": registry_id,
         "service_name": data["service_name"],
-        "build_name": data["build_name"],
+        "build_name": build_name,
         "image_name": data["service_name"],
         "env_name": env_name,
+        "production": production,
         "template_name": "workflow_build_deploy",
     }
     agent: dict[str, Any] = {
+        "deploy_mode": deploy_mode,
         "env_exists": env_exists,
+        "service_exists": service_exists,
+        "production_service_exists": production_service_exists,
+        "build_exists": build_exists,
         "helm_service": helm_service,
         "helm_env_service": helm_env_service,
-        "build": build,
         "workflow": workflow,
     }
+    if not production:
+        agent["build"] = build
     if not env_exists:
         agent["helm_environment"] = {
             "project_key": data["project_key"],
@@ -1120,6 +1163,7 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
             "registry_id": registry_id,
             "production": production,
         }
+    env_type_label = "生产环境" if production else "测试环境"
     preview = {
         "project_key": data["project_key"],
         "application_type": "add_service",
@@ -1129,11 +1173,13 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
                 "items": [
                     {"label": "项目名称", "value": data["project_name"]},
                     {"label": "项目标识", "value": data["project_key"]},
+                    {"label": "环境类型", "value": env_type_label},
                     {"label": "服务名称", "value": data["service_name"]},
                     {"label": "服务模板", "value": data["template_name"]},
                     {"label": "环境", "value": data["environment"]},
                     {"label": "环境状态", "value": "已存在，无需新建" if env_exists else "不存在，Agent 将新建"},
                     {"label": "工作流名称", "value": data["workflow_name"]},
+                    {"label": "部署模式", "value": "生产部署（复用已有构建）" if production else "测试部署（新建构建）"},
                 ],
             },
             {
