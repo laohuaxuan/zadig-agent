@@ -11,7 +11,7 @@ from utils.db import query, query_one
 from webapi.approval_tokens import generate_approval_token
 from webapi.feishu_cards import build_approval_card, build_cc_card, build_status_card
 from webapi.feishu_client import FeishuClient
-from webapi.platform_users import get_user_by_id
+from webapi.platform_users import get_user_by_id, persist_feishu_open_id_if_empty
 from webapi.workflow_feishu_cards import create_workflow_feishu_card, list_workflow_feishu_cards_by_instance
 from webapi.workflows import TASK_PENDING, _get_instance, _parse_levels
 
@@ -46,44 +46,21 @@ def _parse_form_data(instance: dict[str, Any]) -> list[dict[str, str]]:
     return out
 
 
-def _resolve_feishu_open_id(user: dict[str, Any]) -> str:
-    open_id = str(user.get("feishu_open_id") or "").strip()
-    if open_id:
-        return open_id
-    display = str(user.get("display_name") or user.get("name") or "").strip()
-    if not display or not _feishu.enabled():
-        return ""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            return ""
-    except RuntimeError:
-        pass
-    return ""
-
-
 async def _resolve_feishu_open_id_async(user: dict[str, Any]) -> str:
     open_id = str(user.get("feishu_open_id") or "").strip()
     if open_id:
         return open_id
     if not _feishu.enabled():
         return ""
-    display = str(user.get("display_name") or user.get("name") or "").strip()
-    if not display:
-        return ""
-    try:
-        result = await _feishu.list_contact_users(display, 5)
-    except Exception:
-        return ""
-    for item in result.get("items") or []:
-        name = str(item.get("name") or "").strip()
-        candidate = str(item.get("open_id") or "").strip()
-        if candidate and name == display:
-            return candidate
-    items = result.get("items") or []
-    if len(items) == 1:
-        return str(items[0].get("open_id") or "").strip()
-    return ""
+    user_id = int(user.get("id") or 0)
+    resolved = await _feishu.resolve_user_open_id(
+        email=str(user.get("email") or ""),
+        mobile=str(user.get("phone") or user.get("mobile") or ""),
+        name=str(user.get("display_name") or user.get("name") or ""),
+    )
+    if resolved and user_id > 0:
+        persist_feishu_open_id_if_empty(user_id, resolved)
+    return resolved
 
 
 def _pending_task_for_user(instance_id: int, user_id: int) -> dict[str, Any] | None:
@@ -109,18 +86,35 @@ async def _notify_feishu_approver(
     summary: str,
     form_fields: list[dict[str, str]],
 ) -> bool:
+    user_id = int(user.get("id") or 0)
     if not _feishu.enabled():
+        logger.info("feishu disabled, skip approval card instance=%s user_id=%s", instance_id, user_id)
         return False
     open_id = await _resolve_feishu_open_id_async(user)
     if not open_id:
+        logger.warning(
+            "feishu approval card skipped instance=%s user_id=%s: cannot resolve open_id "
+            "(name=%s email=%s phone=%s). 请让审批人使用飞书登录，或在审批模板中选择飞书用户。",
+            instance_id,
+            user_id,
+            user.get("display_name") or user.get("name") or "",
+            user.get("email") or "",
+            user.get("phone") or "",
+        )
         return False
-    task = _pending_task_for_user(instance_id, int(user["id"]))
+    task = _pending_task_for_user(instance_id, user_id)
     if not task:
+        logger.warning(
+            "feishu approval card skipped instance=%s user_id=%s: no pending workflow task",
+            instance_id,
+            user_id,
+        )
         return False
     try:
-        approve_token = generate_approval_token(instance_id, int(task["id"]), int(user["id"]), "approve")
-        reject_token = generate_approval_token(instance_id, int(task["id"]), int(user["id"]), "reject")
-    except ValueError:
+        approve_token = generate_approval_token(instance_id, int(task["id"]), user_id, "approve")
+        reject_token = generate_approval_token(instance_id, int(task["id"]), user_id, "reject")
+    except ValueError as exc:
+        logger.warning("feishu approval card skipped instance=%s user_id=%s: %s", instance_id, user_id, exc)
         return False
     api_base = _feishu.public_api_base()
     card = build_approval_card(
@@ -139,15 +133,21 @@ async def _notify_feishu_approver(
     try:
         message_id = await _feishu.send_interactive_card(open_id, card)
     except Exception as exc:
-        logger.warning("feishu approval card user_id=%s: %s", user.get("id"), exc)
+        logger.warning("feishu approval card user_id=%s open_id=%s: %s", user_id, open_id, exc)
         return False
     if message_id:
         create_workflow_feishu_card(
             instance_id=instance_id,
             task_id=int(task["id"]),
-            user_id=int(user["id"]),
+            user_id=user_id,
             open_message_id=message_id,
             open_id=open_id,
+        )
+        logger.info(
+            "feishu approval card sent instance=%s user_id=%s message_id=%s",
+            instance_id,
+            user_id,
+            message_id,
         )
     return True
 
@@ -160,6 +160,11 @@ async def _notify_initiator(instance: dict[str, Any], header: str, body: str, *,
         return
     open_id = await _resolve_feishu_open_id_async(user)
     if not open_id:
+        logger.warning(
+            "feishu applicant card skipped instance=%s user_id=%s: cannot resolve open_id",
+            instance.get("id"),
+            user.get("id"),
+        )
         return
     card = build_status_card(
         header_title=header,
@@ -169,6 +174,7 @@ async def _notify_initiator(instance: dict[str, Any], header: str, body: str, *,
     )
     try:
         await _feishu.send_interactive_card(open_id, card)
+        logger.info("feishu applicant card sent instance=%s user_id=%s", instance.get("id"), user.get("id"))
     except Exception as exc:
         logger.warning("feishu applicant card user_id=%s: %s", user.get("id"), exc)
 
@@ -184,12 +190,15 @@ async def notify_workflow_level(
     cc_users: list[dict[str, Any]] | None = None,
 ) -> None:
     if not _feishu.enabled() or instance_id <= 0:
+        if instance_id > 0 and not _feishu.enabled():
+            logger.info("feishu disabled, skip level notify instance=%s", instance_id)
         return
     instance = _get_instance(instance_id)
     form_fields = _parse_form_data(instance)
     summary = str(instance.get("summary") or "")
     link = _workflow_instance_link(instance_id)
     seen: set[int] = set()
+    sent = 0
     for raw in assignees or []:
         user_id = int(raw.get("user_id") or 0)
         if user_id <= 0 or user_id in seen:
@@ -197,8 +206,9 @@ async def notify_workflow_level(
         seen.add(user_id)
         user = get_user_by_id(user_id)
         if not user:
+            logger.warning("feishu approval card skipped instance=%s: user_id=%s not found", instance_id, user_id)
             continue
-        await _notify_feishu_approver(
+        if await _notify_feishu_approver(
             instance_id,
             user,
             title=title,
@@ -207,7 +217,10 @@ async def notify_workflow_level(
             level_name=level_name,
             summary=summary,
             form_fields=form_fields,
-        )
+        ):
+            sent += 1
+    if assignees and sent == 0:
+        logger.warning("feishu level notify instance=%s: no approval cards delivered", instance_id)
     for raw in cc_users or []:
         user_id = int(raw.get("user_id") or 0)
         if user_id <= 0 or user_id in seen:
@@ -217,6 +230,7 @@ async def notify_workflow_level(
             continue
         open_id = await _resolve_feishu_open_id_async(user)
         if not open_id:
+            logger.warning("feishu cc card skipped instance=%s user_id=%s: cannot resolve open_id", instance_id, user_id)
             continue
         card = build_cc_card(
             header_title=level_name,
@@ -229,6 +243,7 @@ async def notify_workflow_level(
         )
         try:
             await _feishu.send_interactive_card(open_id, card)
+            logger.info("feishu cc card sent instance=%s user_id=%s", instance_id, user_id)
         except Exception as exc:
             logger.warning("feishu cc card user_id=%s: %s", user_id, exc)
 
@@ -349,8 +364,20 @@ def schedule_revoke_notifications(instance_id: int) -> None:
 def schedule_submit_notifications(instance_id: int) -> None:
     async def _run() -> None:
         try:
+            if not _feishu.enabled():
+                logger.info("feishu submit notify skipped instance=%s: app_id/app_secret 未配置", instance_id)
+                return
             instance = _get_instance(instance_id)
             level_name, assignees, cc_users = get_level_targets(instance_id, int(instance.get("current_level") or 1))
+            if not assignees:
+                logger.warning("feishu submit notify instance=%s: no assignees for level=%s", instance_id, level_name)
+            logger.info(
+                "feishu submit notify instance=%s level=%s assignees=%s cc=%s",
+                instance_id,
+                level_name,
+                [item.get("user_id") for item in assignees],
+                [item.get("user_id") for item in cc_users],
+            )
             await notify_workflow_level(
                 instance_id,
                 title=str(instance.get("title") or ""),
@@ -408,14 +435,6 @@ def schedule_approval_notifications(outcome: dict[str, Any]) -> None:
         except Exception as exc:
             logger.warning("feishu approval notify: %s", exc)
 
-    notify_now = bool(outcome.get("notify_now", True))
-    if not notify_now:
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_run())
-        except RuntimeError:
-            asyncio.run(_run())
-        return
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(_run())

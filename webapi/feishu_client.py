@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -31,6 +32,20 @@ def _normalize_contact_user(item: dict[str, Any]) -> dict[str, Any]:
         "email": str(item.get("email") or "").strip(),
         "mobile": str(item.get("mobile") or "").strip(),
     }
+
+
+def _normalize_feishu_mobile(phone: str) -> str:
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if not digits:
+        return ""
+    if digits.startswith("86") and len(digits) >= 13:
+        return f"+{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+86{digits}"
+    raw = str(phone or "").strip()
+    if raw.startswith("+"):
+        return raw
+    return f"+{digits}" if digits else ""
 
 
 def _filter_contact_users(users: list[dict[str, Any]], keyword: str) -> list[dict[str, Any]]:
@@ -323,6 +338,55 @@ class FeishuClient:
         if warning and not items and "加载中" not in warning:
             raise ValueError(warning)
         return items
+
+    async def resolve_user_open_id(
+        self,
+        *,
+        email: str = "",
+        mobile: str = "",
+        name: str = "",
+    ) -> str:
+        if not self.enabled():
+            return ""
+        email = str(email or "").strip()
+        if email.endswith("@feishu.local"):
+            email = ""
+        mobile = _normalize_feishu_mobile(mobile)
+        if email or mobile:
+            token = await self.tenant_access_token()
+            body: dict[str, Any] = {"include_resigned": False}
+            if email:
+                body["emails"] = [email]
+            if mobile:
+                body["mobiles"] = [mobile]
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{_OPENAPI}/contact/v3/users/batch_get_id",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"user_id_type": "open_id"},
+                    json=body,
+                )
+                data = resp.json()
+            if int(data.get("code", -1)) == 0:
+                for item in (data.get("data") or {}).get("user_list") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    open_id = str(item.get("user_id") or item.get("open_id") or "").strip()
+                    if open_id:
+                        return open_id
+        display = str(name or "").strip()
+        if not display:
+            return ""
+        result = await self.list_contact_users(display, 10)
+        for item in result.get("items") or []:
+            item_name = str(item.get("name") or "").strip()
+            candidate = str(item.get("open_id") or "").strip()
+            if candidate and item_name == display:
+                return candidate
+        items = result.get("items") or []
+        if len(items) == 1:
+            return str(items[0].get("open_id") or "").strip()
+        return ""
 
     async def send_interactive_card(self, open_id: str, card: dict[str, Any]) -> str:
         from webapi.feishu_cards import marshal_interactive_card

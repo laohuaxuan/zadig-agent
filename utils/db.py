@@ -726,6 +726,8 @@ def _migrate_platform_if_needed() -> None:
                 "ALTER TABLE project_applications ADD COLUMN execution_log MEDIUMTEXT NULL AFTER process_message",
                 "ALTER TABLE project_applications ADD COLUMN project_url VARCHAR(512) NOT NULL DEFAULT '' AFTER execution_log",
                 "ALTER TABLE project_applications ADD COLUMN execution_context_json JSON NULL AFTER project_url",
+                "ALTER TABLE workflow_instances ADD COLUMN initiator_read_at DATETIME NULL AFTER updated_at",
+                "ALTER TABLE workflow_instances ADD COLUMN initiator_notify_at DATETIME NULL AFTER initiator_read_at",
             ):
                 try:
                     cur.execute(column_sql)
@@ -735,7 +737,25 @@ def _migrate_platform_if_needed() -> None:
         conn.commit()
     finally:
         conn.close()
+    _backfill_initiator_notify_state()
     _bootstrap_root_user()
+
+
+def _backfill_initiator_notify_state() -> None:
+    conn = _connect(database=mysql_config()["database"])
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE workflow_instances
+                SET initiator_notify_at = COALESCE(initiator_notify_at, updated_at),
+                    initiator_read_at = COALESCE(initiator_read_at, updated_at)
+                WHERE initiator_notify_at IS NULL OR initiator_read_at IS NULL
+                """
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 _LEGACY_ROOT_PASSWORD = "Root@123456"

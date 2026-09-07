@@ -20,7 +20,7 @@ from webapi.agent_runner import (
 from webapi.agent_resources import public_execution_context, resolve_execution_resources
 from webapi.platform_users import get_user_by_id, new_record_id
 from webapi.platform_roles import WORKFLOW_TYPE_ADD_SERVICE, WORKFLOW_TYPE_ADD_WORKFLOW, WORKFLOW_TYPE_HELM_PROJECT
-from webapi.workflows import STATUS_COMPLETED, STATUS_REJECTED, STATUS_REVOKED, create_helm_project_workflow
+from webapi.workflows import STATUS_COMPLETED, STATUS_REJECTED, STATUS_REVOKED, bump_initiator_notify, create_helm_project_workflow
 from webapi.workflow_notify import schedule_submit_notifications
 from webapi.zadig_meta import build_application_plan
 
@@ -325,6 +325,7 @@ def _append_execution_log(app_id: int, chunk: str) -> None:
 
 def _mark_execution_started(app_id: int, *, thread_id: str) -> None:
     now = _now()
+    row = query_one("SELECT workflow_instance_id FROM project_applications WHERE id = %s", (app_id,))
     clear_thread_checkpoints(thread_id)
     execute(
         """
@@ -335,6 +336,8 @@ def _mark_execution_started(app_id: int, *, thread_id: str) -> None:
         """,
         ("执行中", now, app_id),
     )
+    if row and row.get("workflow_instance_id"):
+        bump_initiator_notify(int(row["workflow_instance_id"]))
 
 
 def reconcile_stale_execution(instance_id: int) -> None:
@@ -440,6 +443,7 @@ def _finalize_execution_success(
     project_url: str,
     execution_context: dict[str, Any],
 ) -> None:
+    row = query_one("SELECT workflow_instance_id FROM project_applications WHERE id = %s", (app_id,))
     execute(
         """
         UPDATE project_applications
@@ -456,10 +460,13 @@ def _finalize_execution_success(
             app_id,
         ),
     )
+    if row and row.get("workflow_instance_id"):
+        bump_initiator_notify(int(row["workflow_instance_id"]))
 
 
 def _finalize_execution_error(app_id: int, err: str) -> None:
     message = format_llm_error(str(err or "").strip() or "Agent 执行失败")
+    row = query_one("SELECT workflow_instance_id FROM project_applications WHERE id = %s", (app_id,))
     _append_execution_log(app_id, f"\n❌ 执行失败：{message}\n")
     execute(
         """
@@ -469,6 +476,8 @@ def _finalize_execution_error(app_id: int, err: str) -> None:
         """,
         ("失败", message, _now(), app_id),
     )
+    if row and row.get("workflow_instance_id"):
+        bump_initiator_notify(int(row["workflow_instance_id"]))
 
 
 async def _broadcast_event(instance_id: int, kind: str, payload_item: Any) -> None:
@@ -716,3 +725,5 @@ def sync_application_status(instance_id: int, workflow_status: str) -> None:
         """,
         (label, _now(), instance_id),
     )
+    if workflow_status in {STATUS_REJECTED, STATUS_COMPLETED}:
+        bump_initiator_notify(instance_id)

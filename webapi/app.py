@@ -131,12 +131,14 @@ async def lifespan(_app: FastAPI):
     logger.info("应用启动：开始监听 HTTP 请求")
     sync_task = asyncio.create_task(integration_sync_loop())
     catalog_task = asyncio.create_task(_startup_catalog_sync())
+    feishu_task = asyncio.create_task(_startup_feishu_warmup())
     try:
         yield
     finally:
+        feishu_task.cancel()
         catalog_task.cancel()
         sync_task.cancel()
-        for task in (catalog_task, sync_task):
+        for task in (feishu_task, catalog_task, sync_task):
             try:
                 await task
             except asyncio.CancelledError:
@@ -152,6 +154,22 @@ async def _startup_catalog_sync() -> None:
         raise
     except Exception:
         logger.exception("后台 catalog 同步失败")
+
+
+async def _startup_feishu_warmup() -> None:
+    try:
+        from webapi.feishu_client import FeishuClient
+
+        client = FeishuClient()
+        if not client.enabled():
+            logger.info("飞书未配置 app_id/app_secret，跳过通讯录预热")
+            return
+        await client.list_contact_users("", 1)
+        logger.info("飞书通讯录预热完成")
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("飞书通讯录预热失败")
 
 
 app = FastAPI(title="Zadig Agent Settings", lifespan=lifespan)

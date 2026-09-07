@@ -138,6 +138,55 @@ def _collect_tool_calls(messages: list[Any]) -> list[dict[str, str]]:
     return [item for item in calls if item["name"]]
 
 
+_MAX_PLAN_CONTINUE_ROUNDS = 6
+
+_PLAN_TOOL_AGENT_KEYS: dict[str, str] = {
+    "create_helm_project": "helm_project",
+    "create_build": "build",
+    "create_workflow": "workflow",
+    "create_helm_service_from_template": "helm_service",
+    "add_helm_services": "helm_env_service",
+}
+
+
+def _required_tools_for_plan(payload: dict[str, Any], plan: dict[str, Any]) -> list[str]:
+    app_type = str(payload.get("application_type") or "create_project").strip()
+    if app_type == "add_workflow":
+        return ["create_workflow"]
+    if app_type == "add_service":
+        return [
+            "create_helm_service_from_template",
+            "add_helm_services",
+            "create_build",
+            "create_workflow",
+        ]
+    return ["create_helm_project", "create_build", "create_workflow"]
+
+
+def _successful_tool_names(messages: list[Any]) -> set[str]:
+    return {item["name"] for item in _collect_tool_calls(messages) if item.get("status") == "ok" and item.get("name")}
+
+
+def _missing_plan_tools(payload: dict[str, Any], plan: dict[str, Any], messages: list[Any]) -> list[str]:
+    required = _required_tools_for_plan(payload, plan)
+    done = _successful_tool_names(messages)
+    return [name for name in required if name not in done]
+
+
+def _continue_plan_prompt(missing: list[str], plan: dict[str, Any]) -> str:
+    next_tool = missing[0]
+    agent = plan.get("agent") or {}
+    key = _PLAN_TOOL_AGENT_KEYS.get(next_tool, "")
+    payload_hint = ""
+    if key and agent.get(key) is not None:
+        payload_hint = f"\n\n请使用执行计划中 agent.{key} 的 JSON 参数调用 `{next_tool}`：\n{json.dumps(agent[key], ensure_ascii=False, indent=2)}"
+    return (
+        f"计划尚未完成。请立即调用 MCP 工具 `{next_tool}`，不要输出最终总结或结束语。"
+        f"\n剩余必做步骤：{', '.join(missing)}。"
+        f"{payload_hint}"
+    )
+
+
 async def _emit_log(log_fn: LogCallback | None, text: str) -> None:
     if not log_fn or not text:
         return
@@ -329,8 +378,10 @@ async def run_project_create_agent(
             f"# 资源目录\n{catalog_summary}\n\n"
             "# 执行计划\n"
             f"{json.dumps(plan['agent'], ensure_ascii=False, indent=2)}\n\n"
-            "请严格按 Skill 步骤顺序执行，create_workflow 必须使用执行计划中 workflow.template_name 指定的模板。"
-            "完成后用中文简要总结结果。\n"
+            "请严格按 Skill 步骤顺序依次调用 MCP 工具，每步成功后必须立即执行下一步，"
+            "在完成 Skill 规定的全部必做步骤之前不要输出最终总结。\n"
+            "create_workflow 必须使用执行计划中 workflow.template_name 指定的模板。"
+            "全部必做步骤成功后再用中文简要总结结果。\n"
             f"仅在需要用户确认参数、选择或关键操作前，在回复末尾单独一行输出 `{_CONFIRM_MARKER}`。"
             "任务全部完成后的最终总结不要加此标记。"
         )
@@ -379,6 +430,7 @@ async def run_project_create_agent(
 
         await _emit_log(log_fn, "正在调用模型推理...\n")
 
+        plan_continue_rounds = 0
         while True:
             try:
                 round_messages, step_offset, _duration = await _stream_agent_round(
@@ -407,7 +459,24 @@ async def run_project_create_agent(
                 await _emit_log(log_fn, f"👤 用户：{reply}\n")
                 pending_user_reply = HumanMessage(content=reply)
                 continue
+
+            missing_tools = _missing_plan_tools(payload, plan, all_messages)
+            if missing_tools:
+                if plan_continue_rounds >= _MAX_PLAN_CONTINUE_ROUNDS:
+                    raise ValueError(f"Agent 未完成全部步骤，缺少：{', '.join(missing_tools)}")
+                plan_continue_rounds += 1
+                continue_text = _continue_plan_prompt(missing_tools, plan)
+                await _emit_log(
+                    log_fn,
+                    f"\n⚠️ 计划未完整执行，自动继续第 {plan_continue_rounds} 轮，待完成：{', '.join(missing_tools)}\n",
+                )
+                pending_user_reply = HumanMessage(content=continue_text)
+                continue
             break
+
+        missing_tools = _missing_plan_tools(payload, plan, all_messages)
+        if missing_tools:
+            raise ValueError(f"Agent 未完成全部步骤，缺少：{', '.join(missing_tools)}")
 
         summary = ""
         for msg in reversed(all_messages):

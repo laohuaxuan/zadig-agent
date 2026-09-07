@@ -37,6 +37,21 @@ def _public_user(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def persist_feishu_open_id_if_empty(user_id: int, open_id: str) -> None:
+    text = str(open_id or "").strip()
+    if user_id <= 0 or not text:
+        return
+    execute(
+        """
+        UPDATE platform_users
+        SET feishu_open_id = %s, updated_at = %s
+        WHERE id = %s AND deleted_at IS NULL
+          AND (feishu_open_id IS NULL OR feishu_open_id = '')
+        """,
+        (text, _now(), user_id),
+    )
+
+
 def get_user_by_id(user_id: int) -> dict[str, Any] | None:
     row = query_one(
         "SELECT * FROM platform_users WHERE id = %s AND deleted_at IS NULL",

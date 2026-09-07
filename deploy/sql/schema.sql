@@ -174,6 +174,8 @@ CREATE TABLE IF NOT EXISTS `workflow_instances` (
   `current_level` INT NOT NULL DEFAULT 1,
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL,
+  `initiator_read_at` DATETIME NULL,
+  `initiator_notify_at` DATETIME NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_workflow_serial` (`serial_no`),
   KEY `idx_workflow_ref` (`ref_record_id`),

@@ -35,6 +35,48 @@ _INITIATOR_SELECT = """
 """
 
 
+def _initiator_unread_expr(alias: str = "i") -> str:
+    return (
+        f"({alias}.initiator_notify_at IS NOT NULL "
+        f"AND {alias}.initiator_notify_at > COALESCE({alias}.initiator_read_at, '1970-01-01 00:00:00'))"
+    )
+
+
+def bump_initiator_notify(instance_id: int) -> None:
+    if instance_id <= 0:
+        return
+    execute(
+        "UPDATE workflow_instances SET initiator_notify_at = %s WHERE id = %s",
+        (_now(), instance_id),
+    )
+
+
+def mark_initiator_read(instance_id: int, user_id: int) -> None:
+    if instance_id <= 0 or user_id <= 0:
+        return
+    execute(
+        """
+        UPDATE workflow_instances
+        SET initiator_read_at = %s
+        WHERE id = %s AND initiator_id = %s
+        """,
+        (_now(), instance_id, user_id),
+    )
+
+
+def mark_cc_read(instance_id: int, user_id: int) -> None:
+    if instance_id <= 0 or user_id <= 0:
+        return
+    execute(
+        """
+        UPDATE workflow_ccs
+        SET read_at = %s
+        WHERE instance_id = %s AND user_id = %s AND read_at IS NULL
+        """,
+        (_now(), instance_id, user_id),
+    )
+
+
 def _initiator_execution_clause(instance_alias: str = "i") -> str:
     return f"""
     {instance_alias}.initiator_id = %s
@@ -184,8 +226,9 @@ def create_helm_project_workflow(
                 """
                 INSERT INTO workflow_instances
                 (serial_no, title, workflow_type, status, initiator_id, initiator_name, summary,
-                 form_data, current_node, ref_record_id, template_id, template_snapshot, current_level, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s)
+                 form_data, current_node, ref_record_id, template_id, template_snapshot, current_level,
+                 created_at, updated_at, initiator_read_at, initiator_notify_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s, %s)
                 """,
                 (
                     serial_no,
@@ -200,6 +243,8 @@ def create_helm_project_workflow(
                     record_id,
                     template_id,
                     levels_snapshot(merged),
+                    now,
+                    now,
                     now,
                     now,
                 ),
@@ -254,17 +299,17 @@ def _advance_or_complete(instance_id: int, current_level: int) -> bool:
     now = _now()
     if not next_lv:
         execute(
-            "UPDATE workflow_instances SET status = %s, current_node = %s, updated_at = %s WHERE id = %s",
-            (STATUS_COMPLETED, "已完成", now, instance_id),
+            "UPDATE workflow_instances SET status = %s, current_node = %s, updated_at = %s, initiator_notify_at = %s WHERE id = %s",
+            (STATUS_COMPLETED, "已完成", now, now, instance_id),
         )
         return True
     execute(
         """
         UPDATE workflow_instances
-        SET current_level = %s, current_node = %s, updated_at = %s
+        SET current_level = %s, current_node = %s, updated_at = %s, initiator_notify_at = %s
         WHERE id = %s
         """,
-        (next_level, next_lv.get("name") or f"{next_level}级审批", now, instance_id),
+        (next_level, next_lv.get("name") or f"{next_level}级审批", now, now, instance_id),
     )
     for assignee in next_lv.get("assignees") or []:
         execute(
@@ -369,8 +414,8 @@ def reject_task(instance_id: int, task_id: int, user_id: int, user_name: str, co
         (instance_id, task["node_name"], user_id, user_name, comment, now),
     )
     execute(
-        "UPDATE workflow_instances SET status = %s, updated_at = %s WHERE id = %s",
-        (STATUS_REJECTED, now, instance_id),
+        "UPDATE workflow_instances SET status = %s, updated_at = %s, initiator_notify_at = %s WHERE id = %s",
+        (STATUS_REJECTED, now, now, instance_id),
     )
 
 
@@ -441,11 +486,19 @@ def get_counts(user_id: int) -> dict[str, int]:
         "SELECT COUNT(*) AS n FROM workflow_instances WHERE initiator_id = %s",
         (user_id,),
     )
+    initiated_unread = query_one(
+        f"""
+        SELECT COUNT(*) AS n FROM workflow_instances i
+        WHERE i.initiator_id = %s AND {_initiator_unread_expr("i")}
+        """,
+        (user_id,),
+    )
     return {
         "todo": int(todo["n"]) if todo else 0,
         "done": int(done["n"]) if done else 0,
         "cc": int(cc["n"]) if cc else 0,
         "initiated": int(initiated["n"]) if initiated else 0,
+        "initiated_unread": int(initiated_unread["n"]) if initiated_unread else 0,
     }
 
 
@@ -586,7 +639,7 @@ def list_tasks(user_id: int, box: str, page: int, page_size: int, keyword: str =
             f"""
             SELECT 0 AS task_id, id AS instance_id, serial_no, title, workflow_type,
                    status, summary, initiator_name, '' AS assignee_name, NULL AS processed_at,
-                   created_at, updated_at
+                   created_at, updated_at, initiator_read_at, initiator_notify_at
             FROM workflow_instances
             WHERE initiator_id = %s{kw_clause.replace('i.', '')}
             ORDER BY updated_at DESC
@@ -602,6 +655,14 @@ def list_tasks(user_id: int, box: str, page: int, page_size: int, keyword: str =
         instance_id = int(row["instance_id"])
         application_status = app_status_map.get(instance_id, "")
         has_application = instance_id in app_status_map
+        unread = False
+        if box == "initiated":
+            notify_at = row.get("initiator_notify_at")
+            read_at = row.get("initiator_read_at")
+            if notify_at:
+                unread = str(notify_at) > str(read_at or "1970-01-01 00:00:00")
+        elif box == "cc":
+            unread = not bool(row.get("cc_read_at"))
         items.append(
             {
                 "task_id": int(row.get("task_id") or 0),
@@ -619,6 +680,7 @@ def list_tasks(user_id: int, box: str, page: int, page_size: int, keyword: str =
                 "created_at": str(row.get("created_at") or ""),
                 "updated_at": str(row.get("updated_at") or ""),
                 "cc_read": bool(row.get("cc_read_at")),
+                "unread": unread,
             }
         )
     return items, total
@@ -774,6 +836,9 @@ def get_instance_detail(instance_id: int, user_id: int) -> dict[str, Any]:
 
     reconcile_stale_execution(instance_id)
     instance = _get_instance(instance_id)
+    if int(instance.get("initiator_id") or 0) == user_id:
+        mark_initiator_read(instance_id, user_id)
+    mark_cc_read(instance_id, user_id)
     records = query(
         "SELECT * FROM workflow_records WHERE instance_id = %s ORDER BY id ASC",
         (instance_id,),

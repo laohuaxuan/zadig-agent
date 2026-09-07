@@ -273,7 +273,7 @@ export default function WorkflowPanel() {
   const [detail, setDetail] = useState(null);
   const [detailTab, setDetailTab] = useState("detail");
   const [actionComment, setActionComment] = useState("");
-  const [counts, setCounts] = useState({ todo: 0, cc: 0, initiated: 0, done: 0 });
+  const [counts, setCounts] = useState({ todo: 0, cc: 0, initiated: 0, initiated_unread: 0, done: 0 });
   const [itemsLoading, setItemsLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [acting, setActing] = useState(false);
@@ -296,6 +296,7 @@ export default function WorkflowPanel() {
       todo: data.todo || 0,
       cc: data.cc || 0,
       initiated: data.initiated || 0,
+      initiated_unread: data.initiated_unread || 0,
       done: data.done || 0,
     });
   }, []);
@@ -349,6 +350,7 @@ export default function WorkflowPanel() {
       detailCacheRef.current.set(instanceId, data);
       setDetail(data);
       setActionComment("");
+      await loadCounts();
     } catch (err) {
       if (requestId !== detailRequestRef.current) return;
       setError(err.message);
@@ -357,7 +359,7 @@ export default function WorkflowPanel() {
       setDetailLoading(false);
       if (!silent) setDetailRefreshing(false);
     }
-  }, []);
+  }, [loadCounts]);
 
   const refreshAll = useCallback(
     async (instanceId = selectedId, { silent = false } = {}) => {
@@ -396,7 +398,7 @@ export default function WorkflowPanel() {
   }, [loadItems]);
 
   useEffect(() => {
-    if (selectedId) loadDetail(selectedId);
+    if (selectedId) loadDetail(selectedId, { force: true });
   }, [selectedId, loadDetail]);
 
   useEffect(() => {
@@ -644,6 +646,9 @@ export default function WorkflowPanel() {
                 <span className="workflow-nav-label">{box.label}</span>
                 {box.id === "todo" && counts.todo > 0 ? <span className="wf-badge wf-nav-badge">{counts.todo}</span> : null}
                 {box.id === "cc" && counts.cc > 0 ? <span className="wf-badge wf-nav-badge">{counts.cc}</span> : null}
+                {box.id === "initiated" && counts.initiated_unread > 0 ? (
+                  <span className="wf-badge wf-nav-badge wf-nav-badge-dot" aria-label={`${counts.initiated_unread} 条未读`} />
+                ) : null}
               </button>
             </li>
           ))}
@@ -683,7 +688,7 @@ export default function WorkflowPanel() {
                 <button
                   key={item.instance_id}
                   type="button"
-                  className={`${selectedId === item.instance_id ? "workflow-card active" : "workflow-card"}${item.status === "revoked" ? " workflow-card-revoked" : ""}`}
+                  className={`${selectedId === item.instance_id ? "workflow-card active" : "workflow-card"}${item.status === "revoked" ? " workflow-card-revoked" : ""}${item.unread ? " workflow-card-unread" : ""}`}
                   onClick={() => setSelectedId(item.instance_id)}
                   onMouseEnter={() => {
                     if (!detailCacheRef.current.has(item.instance_id)) {
@@ -697,6 +702,7 @@ export default function WorkflowPanel() {
                     <strong>{item.title}</strong>
                     <span className={`wf-status ${workflowStatusClass(item)}`}>{item.status_label}</span>
                   </div>
+                  {item.unread ? <span className="wf-card-badge wf-card-badge-dot" aria-label="未读" /> : null}
                   <p className="workflow-card-summary">{item.summary || item.workflow_type}</p>
                   <div className="workflow-card-meta">
                     <span>{item.initiator_name || "-"}</span>

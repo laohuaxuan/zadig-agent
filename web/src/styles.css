@@ -2574,6 +2574,15 @@ select.scroll-select[size] {
   box-shadow: 0 0 0 2px #f8fbff;
 }
 
+.wf-nav-badge-dot {
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+}
+
 .workflow-card-top {
   display: flex;
   justify-content: space-between;
