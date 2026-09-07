@@ -473,6 +473,105 @@ def service_exists_in_project(project_key: str, service_name: str) -> bool:
     return any(name.lower() == target for name in list_project_service_names(project_key))
 
 
+def _extract_service_names_from_env_payload(data: Any) -> list[str]:
+    names: list[str] = []
+    if not isinstance(data, dict):
+        return names
+    buckets: list[Any] = []
+    for key in ("services", "service_list", "workloads", "helm_services"):
+        bucket = data.get(key)
+        if isinstance(bucket, list):
+            buckets.append(bucket)
+    env_info = data.get("env_info")
+    if isinstance(env_info, dict):
+        for key in ("services", "service_list", "workloads"):
+            bucket = env_info.get(key)
+            if isinstance(bucket, list):
+                buckets.append(bucket)
+    for bucket in buckets:
+        for item in bucket:
+            if isinstance(item, str):
+                name = item.strip()
+            elif isinstance(item, dict):
+                name = str(item.get("service_name") or item.get("name") or "").strip()
+            else:
+                continue
+            if name and name.lower() not in {existing.lower() for existing in names}:
+                names.append(name)
+    return names
+
+
+def service_exists_in_environment(
+    project_key: str,
+    env_name: str,
+    service_name: str,
+    *,
+    production: bool = False,
+) -> bool:
+    key = str(project_key or "").strip()
+    env = str(env_name or "").strip()
+    target = str(service_name or "").strip().lower()
+    if not key or not env or not target:
+        return False
+    root = "/openapi/environments/production" if production else "/openapi/environments"
+    try:
+        data = zadig_request("GET", f"{root}/{env}", params={"projectKey": key})
+    except Exception:
+        return False
+    names = _extract_service_names_from_env_payload(data)
+    return any(name.lower() == target for name in names)
+
+
+def build_exists_for_service(project_key: str, service_name: str) -> bool:
+    return _resolve_build_for_service(project_key, service_name) is not None
+
+
+def check_add_service_constraints(
+    project_key: str,
+    service_name: str,
+    environment: str = "",
+    *,
+    environment_production: bool = False,
+    environment_mode: str = "existing",
+) -> dict[str, Any]:
+    key = str(project_key or "").strip()
+    name = str(service_name or "").strip()
+    env = str(environment or "").strip()
+    mode = str(environment_mode or "existing").strip() or "existing"
+    result: dict[str, Any] = {
+        "ok": True,
+        "blocked": False,
+        "exists": False,
+        "reason": "",
+        "message": "",
+        "name": name,
+    }
+    if not key or not name:
+        return result
+
+    if environment_production and not build_exists_for_service(key, name):
+        return {
+            **result,
+            "blocked": True,
+            "exists": True,
+            "reason": "prod_without_test_build",
+            "message": f"请先在测试环境创建服务「{name}」（含构建），再添加生产环境服务",
+        }
+
+    if env and mode != "new":
+        if environment_exists_in_project(key, env, production=environment_production):
+            if service_exists_in_environment(key, env, name, production=environment_production):
+                return {
+                    **result,
+                    "blocked": True,
+                    "exists": True,
+                    "reason": "same_env",
+                    "message": f"当前已选环境「{env}」中存在相同名称的服务「{name}」",
+                }
+
+    return result
+
+
 def list_project_environments(project_key: str, *, production: bool = False) -> list[dict[str, str]]:
     key = str(project_key or "").strip()
     if not key:
@@ -535,7 +634,7 @@ def _validate_project_input(payload: dict[str, Any]) -> dict[str, Any]:
     service_name = str(payload.get("service_name") or "").strip()
     template_name = str(payload.get("template_name") or "").strip()
     environment = str(payload.get("environment") or "dev").strip()
-    environment_production = bool(payload.get("environment_production", False))
+    environment_production = False
     workflow_name = str(payload.get("workflow_name") or "").strip()
     cluster_name = str(payload.get("cluster_name") or "").strip()
     namespace = str(payload.get("namespace") or "").strip()
@@ -838,6 +937,7 @@ def _validate_add_service_input(payload: dict[str, Any]) -> dict[str, Any]:
     service_name = str(payload.get("service_name") or "").strip()
     template_name = str(payload.get("template_name") or "").strip()
     environment = str(payload.get("environment") or "dev").strip().lower()
+    environment_mode = str(payload.get("environment_mode") or "existing").strip()
     environment_production = bool(payload.get("environment_production", False))
     workflow_name = str(payload.get("workflow_name") or "").strip()
     cluster_name = str(payload.get("cluster_name") or "").strip()
@@ -857,8 +957,15 @@ def _validate_add_service_input(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("请选择项目")
     if not service_name:
         raise ValueError("服务名称不能为空")
-    if service_exists_in_project(project_key, service_name):
-        raise ValueError(f"项目 {project_key} 中已存在服务 {service_name}")
+    constraint = check_add_service_constraints(
+        project_key,
+        service_name,
+        environment,
+        environment_production=environment_production,
+        environment_mode=environment_mode,
+    )
+    if constraint.get("blocked"):
+        raise ValueError(str(constraint.get("message") or "当前无法添加该服务"))
     if not template_name:
         raise ValueError("请选择服务模板")
     if not environment:
@@ -883,6 +990,7 @@ def _validate_add_service_input(payload: dict[str, Any]) -> dict[str, Any]:
         "service_name": service_name,
         "template_name": template_name,
         "environment": environment,
+        "environment_mode": environment_mode,
         "environment_production": environment_production,
         "workflow_name": workflow_name,
         "cluster_name": cluster_name,

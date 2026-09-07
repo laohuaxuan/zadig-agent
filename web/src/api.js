@@ -143,9 +143,14 @@ export function fetchProjects(params) {
   return request(withPage("/api/projects", params));
 }
 
-export function checkProjectService(projectKey, name) {
+export function checkProjectService(projectKey, name, { environment = "", production = false, environmentMode = "existing" } = {}) {
   const url = new URL(`/api/projects/${encodeURIComponent(projectKey)}/services/check`, window.location.origin);
   url.searchParams.set("name", name);
+  if (environment) {
+    url.searchParams.set("environment", environment);
+  }
+  url.searchParams.set("production", production ? "true" : "false");
+  url.searchParams.set("environment_mode", environmentMode);
   return request(`${url.pathname}${url.search}`);
 }
 

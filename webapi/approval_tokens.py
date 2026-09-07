@@ -13,6 +13,20 @@ from webapi.feishu_app import feishu_app_namespace
 _APPROVAL_TOKEN_TTL = timedelta(days=7)
 
 
+def infer_approval_token_app(token: str) -> str:
+    """从 JWT 未验签解析 app，用于多产品共用飞书 App 时的回调路由。"""
+    text = str(token or "").strip()
+    if not text:
+        return ""
+    try:
+        payload = jwt.decode(text, options={"verify_signature": False, "verify_exp": False})
+    except jwt.PyJWTError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("app") or "").strip()
+
+
 def generate_approval_token(instance_id: int, task_id: int, user_id: int, action: str) -> str:
     action = str(action or "").strip()
     if instance_id <= 0 or task_id <= 0 or user_id <= 0:

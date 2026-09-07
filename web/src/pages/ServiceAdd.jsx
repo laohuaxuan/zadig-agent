@@ -128,7 +128,7 @@ export default function ServiceAdd() {
     environments: false,
     serviceCheck: false,
   });
-  const [serviceCheck, setServiceCheck] = useState({ exists: false, message: "" });
+  const [serviceCheck, setServiceCheck] = useState({ exists: false, blocked: false, message: "", reason: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -167,7 +167,7 @@ export default function ServiceAdd() {
     workflowNameTouched.current = false;
     namespaceTouched.current = false;
     setForm({ ...INITIAL_FORM });
-    setServiceCheck({ exists: false, message: "" });
+    setServiceCheck({ exists: false, blocked: false, message: "", reason: "" });
   }
 
   useEffect(() => {
@@ -269,25 +269,37 @@ export default function ServiceAdd() {
   useEffect(() => {
     const name = form.service_name.trim();
     if (!form.project_key || !name) {
-      setServiceCheck({ exists: false, message: "" });
+      setServiceCheck({ exists: false, blocked: false, message: "", reason: "" });
       return;
     }
     const timer = setTimeout(async () => {
       setOptionsLoading((prev) => ({ ...prev, serviceCheck: true }));
       try {
-        const data = await checkProjectService(form.project_key, name);
+        const data = await checkProjectService(form.project_key, name, {
+          environment: form.environment,
+          production: form.environment_production,
+          environmentMode: form.environment_mode,
+        });
         setServiceCheck({
-          exists: Boolean(data.exists),
-          message: data.exists ? `项目 ${form.project_key} 中已存在服务 ${name}` : "",
+          exists: Boolean(data.blocked ?? data.exists),
+          blocked: Boolean(data.blocked ?? data.exists),
+          reason: data.reason || "",
+          message: data.message || "",
         });
       } catch (err) {
-        setServiceCheck({ exists: false, message: err.message });
+        setServiceCheck({ exists: false, blocked: false, message: err.message, reason: "" });
       } finally {
         setOptionsLoading((prev) => ({ ...prev, serviceCheck: false }));
       }
     }, 400);
     return () => clearTimeout(timer);
-  }, [form.project_key, form.service_name]);
+  }, [
+    form.project_key,
+    form.service_name,
+    form.environment,
+    form.environment_production,
+    form.environment_mode,
+  ]);
 
   useEffect(() => {
     if (!form.cluster_name) {
@@ -474,8 +486,8 @@ export default function ServiceAdd() {
   }
 
   function buildPayload() {
-    if (serviceCheck.exists) {
-      throw new Error(serviceCheck.message || "服务名称已存在");
+    if (serviceCheck.blocked || serviceCheck.exists) {
+      throw new Error(serviceCheck.message || "当前无法添加该服务");
     }
     return {
       application_type: "add_service",
@@ -483,6 +495,7 @@ export default function ServiceAdd() {
       project_name: form.project_name || form.project_key,
       service_name: form.service_name.trim(),
       template_name: form.template_name,
+      environment_mode: form.environment_mode,
       environment: form.environment,
       environment_production: form.environment_production,
       workflow_name: form.workflow_name || suggestedWorkflowName,
@@ -945,6 +958,7 @@ export default function ServiceAdd() {
             className="primary-btn"
             disabled={
               saving ||
+              serviceCheck.blocked ||
               serviceCheck.exists ||
               !form.project_key ||
               !form.environment ||

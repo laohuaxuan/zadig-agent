@@ -10,10 +10,11 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from utils.config import feishu_config
 from webapi.approval_action import ApprovalActionOutcome, build_outcome_card, run_approval_action_from_token
+from webapi.approval_tokens import infer_approval_token_app
 from webapi.feishu_app import feishu_app_namespace, feishu_peer_base_url
 from webapi.feishu_callback import callback_verification_token, parse_callback_body, parse_card_action_event
 from webapi.feishu_cards import format_card_callback_response
@@ -25,6 +26,26 @@ router = APIRouter()
 _inflight: dict[str, float] = {}
 _INFLIGHT_TTL = 120.0
 _PROCESS_HEADER = "x-feishu-callback-process"
+
+
+def _resolve_callback_target_app(event_app: str, token: str, cfg: dict[str, Any]) -> str:
+    app = str(event_app or "").strip()
+    if app:
+        return app
+    inferred = infer_approval_token_app(token)
+    if inferred:
+        return inferred
+    return feishu_app_namespace(cfg)
+
+
+def _peer_approval_action_url(cfg: dict[str, Any], target_app: str, token: str) -> str:
+    peer = feishu_peer_base_url(cfg, target_app)
+    text = str(token or "").strip()
+    if not peer or not text:
+        return ""
+    from urllib.parse import quote
+
+    return f"{peer.rstrip('/')}/api/feishu/approval/action?token={quote(text)}"
 
 
 def _ack_json(payload: dict[str, Any]) -> JSONResponse:
@@ -109,15 +130,22 @@ async def _handle_feishu_card_callback(request: Request, *, skip_route: bool) ->
         return _ack_json({})
 
     local_app = feishu_app_namespace(cfg)
-    event_app = str(event.app or "").strip()
-    if not skip_route and event_app and event_app != local_app:
-        peer = feishu_peer_base_url(cfg, event_app)
+    target_app = _resolve_callback_target_app(event.app, event.token, cfg)
+    if not skip_route and target_app and target_app != local_app:
+        peer = feishu_peer_base_url(cfg, target_app)
         if peer:
+            logger.info(
+                "feishu card callback route %s -> %s action=%s message_id=%s",
+                local_app,
+                target_app,
+                event.action,
+                event.open_message_id,
+            )
             return await _forward_feishu_callback(peer, raw, request.headers)
         return _ack_json(
             format_card_callback_response(
                 "error",
-                f"该审批属于 {event_app}，请前往对应平台处理",
+                f"该审批属于 {target_app}，请前往对应平台处理",
                 None,
                 v1=event.v1,
             )
@@ -161,7 +189,15 @@ async def feishu_card_callback_process(request: Request) -> JSONResponse:
 
 
 @router.get("/api/feishu/approval/action", response_class=HTMLResponse)
-def feishu_approval_action(token: str = "") -> HTMLResponse:
+def feishu_approval_action(token: str = "") -> HTMLResponse | RedirectResponse:
+    cfg = feishu_config()
+    local_app = feishu_app_namespace(cfg)
+    target_app = _resolve_callback_target_app("", token, cfg)
+    if target_app and target_app != local_app:
+        redirect_url = _peer_approval_action_url(cfg, target_app, token)
+        if redirect_url:
+            logger.info("feishu approval action redirect %s -> %s", local_app, target_app)
+            return RedirectResponse(url=redirect_url, status_code=307)
     outcome = run_approval_action_from_token(token, notify_now=True)
     title = outcome.page_title or "审批结果"
     message = outcome.page_message or outcome.toast_message or "处理完成"

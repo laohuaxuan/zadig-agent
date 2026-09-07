@@ -97,9 +97,9 @@ from webapi.zadig_meta import (
     list_repo_namespaces,
     list_repo_tree,
     list_repos,
+    check_add_service_constraints,
     resolve_applicant,
     resolve_platform_applicant,
-    service_exists_in_project,
     workflow_exists_in_project,
 )
 
@@ -588,12 +588,24 @@ def api_list_project_services(project_key: str) -> dict[str, Any]:
 
 
 @app.get("/api/projects/{project_key}/services/check")
-def api_check_project_service(project_key: str, name: str = "") -> dict[str, Any]:
+def api_check_project_service(
+    project_key: str,
+    name: str = "",
+    environment: str = "",
+    production: bool = False,
+    environment_mode: str = "existing",
+) -> dict[str, Any]:
     try:
-        exists = service_exists_in_project(project_key, name)
+        result = check_add_service_constraints(
+            project_key,
+            name,
+            environment,
+            environment_production=production,
+            environment_mode=environment_mode,
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"ok": True, "exists": exists, "name": name}
+    return {"ok": True, **result}
 
 
 @app.get("/api/projects/{project_key}/workflows")

@@ -20,16 +20,6 @@ import {
 
 const APPLICANT_ROLE = "project-admin";
 
-const ENV_TYPE_OPTIONS = [
-  { value: "false", label: "测试环境" },
-  { value: "true", label: "生产环境" },
-];
-
-const DEFAULT_ENV_NAME = {
-  false: "dev",
-  true: "prod",
-};
-
 const VAR_TYPES = [
   { value: "string", label: "字符串" },
   { value: "choice", label: "单选" },
@@ -318,20 +308,6 @@ export default function ProjectCreate() {
           next.workflow_name = defaultWorkflowName(next.project_key || prev.project_key, next.project_name, value);
         }
       }
-      if (key === "environment_production") {
-        const isProduction = value === true || value === "true";
-        next.environment_production = isProduction;
-        if (!envNameTouched.current) {
-          next.environment = DEFAULT_ENV_NAME[isProduction];
-        }
-        if (!workflowNameTouched.current) {
-          next.workflow_name = defaultWorkflowName(
-            next.project_key || prev.project_key,
-            next.project_name,
-            next.environment,
-          );
-        }
-      }
       if (key === "repo_name" && value) {
         next.build_context_dir = value;
         next.dockerfile_suffix = "Dockerfile";
@@ -394,6 +370,7 @@ export default function ProjectCreate() {
     }
     const payload = {
       ...form,
+      environment_production: false,
       project_key: form.project_key || slugKey(form.project_name),
       service_name: form.service_name || slugKey(form.project_name),
       workflow_name: form.workflow_name || suggestedWorkflowName,
@@ -501,18 +478,7 @@ export default function ProjectCreate() {
             </label>
             <label>
               <FieldLabel required>环境</FieldLabel>
-              <ScrollSelect
-                required
-                optionCount={ENV_TYPE_OPTIONS.length}
-                value={String(form.environment_production)}
-                onChange={(e) => update("environment_production", e.target.value === "true")}
-              >
-                {ENV_TYPE_OPTIONS.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </ScrollSelect>
+              <input value="测试环境" disabled readOnly aria-readonly="true" />
             </label>
             <label>
               <FieldLabel required>环境名称</FieldLabel>
@@ -520,7 +486,7 @@ export default function ProjectCreate() {
                 required
                 value={form.environment}
                 onChange={(e) => update("environment", e.target.value)}
-                placeholder={form.environment_production ? "prod" : "dev"}
+                placeholder="dev"
               />
             </label>
             <label>
