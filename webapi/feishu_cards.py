@@ -90,7 +90,7 @@ def _build_body(
 ) -> str:
     parts = [
         f"**申请人：**{initiator or '-'}",
-        f"**摘要：**{summary or title or '-'}",
+        f"**摘要：**{title or summary or '-'}",
         f"**流程编号：**{serial_no or '-'}",
         f"**当前节点：**{level_name or '-'}",
     ]
