@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
 
+from model.openrouter import get_openrouter_llm, new_llm_session_id
 from utils.llm_errors import format_llm_error
 from utils.mcp import get_zadig_mcp_tools
 from webapi.agent_resources import (
@@ -313,13 +314,14 @@ async def run_project_create_agent(
             f"仅在需要用户确认参数、选择或关键操作前，在回复末尾单独一行输出 `{_CONFIRM_MARKER}`。"
             "任务全部完成后的最终总结不要加此标记。"
         )
+        session_id = new_llm_session_id("zadig-agent")
         agent = create_react_agent(
-            model=get_openrouter_llm().bind_tools(tools),
+            model=get_openrouter_llm(session_id=session_id).bind_tools(tools),
             tools=tools,
             prompt=system_prompt,
         )
         config = RunnableConfig(
-            configurable={"thread_id": f"project-{uuid.uuid4().hex[:10]}"},
+            configurable={"thread_id": session_id},
             recursion_limit=40,
         )
         conversation: list[Any] = [

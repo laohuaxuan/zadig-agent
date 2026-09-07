@@ -13,6 +13,11 @@ def format_llm_error(raw: object) -> str:
 
     lowered = text.lower()
     if "ip_not_allowed" in lowered or "proxy_forbidden" in lowered or "allowed network segments" in lowered:
+        if "session_id_required" in lowered or "only serves agent requests" in lowered:
+            return (
+                "模型 API 网关要求 Agent 请求携带 session_id（session_id_required）。"
+                "请升级 zadig-agent 至最新版本；若仍失败，请确认 base_url 指向 agent 专用网关。"
+            )
         return (
             "模型 API 网关拒绝了当前服务器的 IP（ip_not_allowed）。"
             "请在 Agent 的 base_url 服务商处将 Kubernetes 集群出口 IP 加入白名单，"
@@ -23,6 +28,8 @@ def format_llm_error(raw: object) -> str:
     code_match = re.search(r"Error code:\s*(\d+)", text)
     if code_match and code_match.group(1) == "457":
         return format_llm_error("ip_not_allowed")
+    if code_match and code_match.group(1) == "456":
+        return format_llm_error("session_id_required")
 
     json_start = text.find("{")
     if json_start >= 0:

@@ -2829,6 +2829,14 @@ select.scroll-select[size] {
   color: #1d4ed8;
 }
 
+.agent-test-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
 .workflow-agent-resources {
   margin: 0 0 12px;
   padding: 12px;

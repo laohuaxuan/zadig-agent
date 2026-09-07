@@ -77,9 +77,9 @@ export default function AgentForm() {
     setError("");
     try {
       const data = await testAgent(buildPayload());
-      setTestResult(data);
+      setTestResult({ ...data, request_failed: false });
     } catch (err) {
-      setTestResult({ available: false, message: err.message });
+      setTestResult({ available: false, message: err.message, request_failed: true });
     } finally {
       setTesting(false);
     }
@@ -125,9 +125,16 @@ export default function AgentForm() {
       ) : null}
       {testResult ? (
         <div className={`banner ${testResult.available ? "success" : "error"}`} role="status">
-          {testResult.available ? "测试通过：" : "测试失败："}
+          {testResult.request_failed
+            ? "请求失败："
+            : testResult.available
+              ? "连接测试通过："
+              : "连接测试未通过："}
           {testResult.message || (testResult.available ? "Agent 可用" : "Agent 不可用")}
           {testResult.active_model ? `（${testResult.active_model}）` : ""}
+          {!testResult.request_failed && !testResult.available ? (
+            <span className="agent-test-hint"> 服务端已正常响应（HTTP 200），但模型 API 拒绝连接。</span>
+          ) : null}
         </div>
       ) : null}
       <form className="form-card skill-detail-form" onSubmit={onSubmit}>
