@@ -1,4 +1,5 @@
 import { fetchClusters, fetchCodeSources, fetchRegistries, fetchServiceTemplates, fetchUsers } from "./api.js";
+import { registryFullPath } from "./utils/integrationOptions.js";
 
 function formatTime(value) {
   if (!value) return "—";
@@ -50,9 +51,8 @@ export const RESOURCES = {
     remarkType: "registry",
     editableRemark: true,
     columns: [
-      { key: "namespace", label: "命名空间" },
+      { key: "registry_path", label: "地址/命名空间", render: (_, row) => registryFullPath(row) },
       { key: "provider", label: "提供商" },
-      { key: "address", label: "地址" },
       { key: "is_default", label: "默认", render: (v) => (v ? "是" : "否") },
       { key: "remark", label: "备注" },
     ],

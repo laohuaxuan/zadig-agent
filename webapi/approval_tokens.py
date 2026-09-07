@@ -7,7 +7,8 @@ from typing import Any
 
 import jwt
 
-from utils.config import auth_config
+from utils.config import auth_config, feishu_config
+from webapi.feishu_app import feishu_app_namespace
 
 _APPROVAL_TOKEN_TTL = timedelta(days=7)
 
@@ -20,6 +21,7 @@ def generate_approval_token(instance_id: int, task_id: int, user_id: int, action
         raise ValueError(f"invalid approval action: {action}")
     now = datetime.now(timezone.utc)
     payload = {
+        "app": feishu_app_namespace(feishu_config()),
         "instance_id": int(instance_id),
         "task_id": int(task_id),
         "user_id": int(user_id),
@@ -38,7 +40,12 @@ def parse_approval_token(token: str) -> dict[str, Any]:
     action = str(payload.get("action") or "").strip()
     if action not in {"approve", "reject"}:
         raise ValueError("无效审批操作")
+    app = str(payload.get("app") or "").strip()
+    expected = feishu_app_namespace(feishu_config())
+    if app and app != expected:
+        raise ValueError(f"该审批属于 {app}，请前往对应平台处理")
     return {
+        "app": app or expected,
         "instance_id": int(payload["instance_id"]),
         "task_id": int(payload["task_id"]),
         "user_id": int(payload["user_id"]),

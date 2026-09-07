@@ -30,6 +30,9 @@ data:
 
     feishu:
       app_base_url: "https://zadig-agent.example.com"
+      app_namespace: "zadig-agent"
+      peer_app_base_urls:
+        mse-domain-binding: "https://mse-domain-binding.example.com"
       app_id: ""
       app_secret: ""
       oauth_redirect_uri: ""

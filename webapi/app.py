@@ -193,6 +193,7 @@ _PUBLIC_API_PREFIXES = (
     "/api/login/local",
     "/api/login/root",
     "/api/feishu/card/callback",
+    "/api/feishu/card/callback/process",
     "/api/feishu/approval/action",
 )
 

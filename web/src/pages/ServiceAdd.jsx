@@ -12,25 +12,31 @@ import {
   fetchProjectEnvironment,
   submitServiceApplication,
 } from "../api.js";
-import { fetchAllProjectEnvironments, loadServiceAddOptions, mapEnvironmentOptions } from "../utils/projectFormCache.js";
+import { fetchAllProjectEnvironments, isProductionEnvironment, loadServiceAddOptions, mapEnvironmentOptions } from "../utils/projectFormCache.js";
 import {
   clusterOptionLabel,
   codeSourceOptionLabel,
   serviceTemplateOptionLabel,
 } from "../utils/integrationOptions.js";
 
-const VAR_TYPES = [
-  { value: "string", label: "字符串" },
-  { value: "choice", label: "单选" },
-  { value: "multi-select", label: "多选" },
+const ENV_TYPE_OPTIONS = [
+  { value: "false", label: "测试环境" },
+  { value: "true", label: "生产环境" },
 ];
+
+const DEFAULT_ENV_NAME = {
+  false: "dev",
+  true: "prod",
+};
 
 const INITIAL_FORM = {
   project_key: "",
   project_name: "",
   service_name: "",
   template_name: "",
+  environment_mode: "existing",
   environment: "",
+  environment_production: false,
   workflow_name: "",
   cluster_name: "",
   namespace: "",
@@ -45,11 +51,24 @@ const INITIAL_FORM = {
   build_variables: [],
 };
 
+const VAR_TYPES = [
+  { value: "string", label: "字符串" },
+  { value: "choice", label: "单选" },
+  { value: "multi-select", label: "多选" },
+];
+
 function defaultWorkflowName(serviceName, environment) {
   const svc = String(serviceName || "").trim();
   const env = String(environment || "dev").trim();
   if (!svc) return "";
   return env ? `${svc}-${env}` : svc;
+}
+
+function defaultNamespace(projectKey, environment) {
+  const key = String(projectKey || "").trim();
+  const env = String(environment || "dev").trim();
+  if (!key || !env) return "";
+  return `${key}-${env}`;
 }
 
 function emptyVarRow() {
@@ -120,6 +139,13 @@ export default function ServiceAdd() {
     [form.service_name, form.environment],
   );
 
+  const suggestedNamespace = useMemo(
+    () => defaultNamespace(form.project_key, form.environment),
+    [form.project_key, form.environment],
+  );
+
+  const isNewEnvironment = form.environment_mode === "new";
+
   const dockerfilePath = useMemo(
     () => joinContextPath(form.build_context_dir, form.dockerfile_suffix),
     [form.build_context_dir, form.dockerfile_suffix],
@@ -180,8 +206,10 @@ export default function ServiceAdd() {
   }, []);
 
   useEffect(() => {
-    if (!form.project_key) {
-      setOptions((prev) => ({ ...prev, environments: [] }));
+    if (!form.project_key || isNewEnvironment) {
+      if (!form.project_key) {
+        setOptions((prev) => ({ ...prev, environments: [] }));
+      }
       return;
     }
     let cancelled = false;
@@ -198,24 +226,29 @@ export default function ServiceAdd() {
           if (!currentEnv) {
             return { ...prev, environment: "" };
           }
-          return prev.environment === currentEnv ? prev : { ...prev, environment: currentEnv };
+          const envItem = items.find((item) => item.env_name === currentEnv);
+          const production = isProductionEnvironment(envItem);
+          return prev.environment === currentEnv && prev.environment_production === production
+            ? prev
+            : { ...prev, environment: currentEnv, environment_production: production };
         });
         if (!currentEnv) {
           return;
         }
         const envItem = items.find((item) => item.env_name === currentEnv);
-        const production = envItem?.production === "true" || envItem?.production === true;
+        const production = isProductionEnvironment(envItem);
         try {
           const data = await fetchProjectEnvironment(form.project_key, currentEnv, { production });
           const detail = data.item || {};
           setForm((prev) => ({
             ...prev,
             environment: currentEnv,
+            environment_production: production,
             cluster_name: detail.cluster_name || prev.cluster_name,
             namespace: namespaceTouched.current ? prev.namespace : detail.namespace || prev.namespace,
           }));
         } catch {
-          setForm((prev) => ({ ...prev, environment: currentEnv }));
+          setForm((prev) => ({ ...prev, environment: currentEnv, environment_production: production }));
         }
       })
       .catch(() => {
@@ -231,7 +264,7 @@ export default function ServiceAdd() {
     return () => {
       cancelled = true;
     };
-  }, [form.project_key]);
+  }, [form.project_key, isNewEnvironment]);
 
   useEffect(() => {
     const name = form.service_name.trim();
@@ -322,6 +355,32 @@ export default function ServiceAdd() {
           next.namespace = "";
         }
       }
+      if (key === "environment_mode") {
+        namespaceTouched.current = false;
+        if (value === "new") {
+          next.environment_production = false;
+          next.environment = DEFAULT_ENV_NAME.false;
+          next.cluster_name = "";
+          next.namespace = defaultNamespace(next.project_key, DEFAULT_ENV_NAME.false);
+          namespaceTouched.current = false;
+        } else {
+          const names = options.environments.map((item) => item.env_name);
+          const current = names.includes(next.environment) ? next.environment : names[0] || "";
+          next.environment = current;
+          const envItem = options.environments.find((item) => item.env_name === current);
+          next.environment_production = isProductionEnvironment(envItem);
+        }
+      }
+      if (key === "environment_production") {
+        const isProduction = value === true || value === "true";
+        next.environment_production = isProduction;
+        if (next.environment_mode === "new" && !next.environment.trim()) {
+          next.environment = DEFAULT_ENV_NAME[String(isProduction)];
+        }
+        if (next.environment_mode === "new" && !namespaceTouched.current) {
+          next.namespace = defaultNamespace(next.project_key, next.environment);
+        }
+      }
       if (key === "project_key") {
         namespaceTouched.current = false;
         workflowNameTouched.current = false;
@@ -339,6 +398,9 @@ export default function ServiceAdd() {
         if (!workflowNameTouched.current) {
           next.workflow_name = defaultWorkflowName(next.service_name, value);
         }
+        if (next.environment_mode === "new" && !namespaceTouched.current) {
+          next.namespace = defaultNamespace(next.project_key, value);
+        }
       }
       if (key === "repo_name" && value) {
         next.build_context_dir = value;
@@ -353,22 +415,30 @@ export default function ServiceAdd() {
   }
 
   async function onEnvironmentChange(envName) {
-    update("environment", envName);
+    const envItem = options.environments.find((item) => item.env_name === envName);
+    const production = isProductionEnvironment(envItem);
+    setForm((prev) => ({
+      ...prev,
+      environment: envName,
+      environment_production: production,
+      workflow_name: workflowNameTouched.current
+        ? prev.workflow_name
+        : defaultWorkflowName(prev.service_name, envName),
+    }));
     const projectKey = form.project_key;
     if (!projectKey || !envName) return;
-    const envItem = options.environments.find((item) => item.env_name === envName);
-    const production = envItem?.production === "true" || envItem?.production === true;
     try {
       const data = await fetchProjectEnvironment(projectKey, envName, { production });
       const item = data.item || {};
       setForm((prev) => ({
         ...prev,
         environment: envName,
+        environment_production: production,
         cluster_name: item.cluster_name || prev.cluster_name,
         namespace: namespaceTouched.current ? prev.namespace : item.namespace || prev.namespace,
       }));
     } catch {
-      /* 自定义环境或无详情时保留用户输入 */
+      /* 保留用户输入 */
     }
   }
 
@@ -414,6 +484,7 @@ export default function ServiceAdd() {
       service_name: form.service_name.trim(),
       template_name: form.template_name,
       environment: form.environment,
+      environment_production: form.environment_production,
       workflow_name: form.workflow_name || suggestedWorkflowName,
       cluster_name: form.cluster_name,
       namespace: form.namespace,
@@ -525,31 +596,73 @@ export default function ServiceAdd() {
               </ScrollSelect>
             </label>
             <label>
-              <FieldLabel required>环境</FieldLabel>
+              <FieldLabel required>环境来源</FieldLabel>
               <ScrollSelect
                 required
                 disabled={!form.project_key}
-                loading={Boolean(form.project_key && optionsLoading.environments)}
-                optionCount={environmentOptions.length + 1}
-                value={form.environment}
-                onChange={(e) => onEnvironmentChange(e.target.value)}
+                optionCount={2}
+                value={form.environment_mode}
+                onChange={(e) => update("environment_mode", e.target.value)}
               >
-                <option value="">
-                  {form.project_key
-                    ? optionsLoading.environments
-                      ? "加载中…"
-                      : environmentOptions.length
-                        ? "请选择"
-                        : "当前项目暂无环境"
-                    : "请先选择项目"}
-                </option>
-                {environmentOptions.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
+                <option value="existing">使用已有环境</option>
+                <option value="new">创建新环境</option>
               </ScrollSelect>
             </label>
+            {isNewEnvironment ? (
+              <>
+                <label>
+                  <FieldLabel required>环境类型</FieldLabel>
+                  <ScrollSelect
+                    required
+                    optionCount={ENV_TYPE_OPTIONS.length}
+                    value={String(form.environment_production)}
+                    onChange={(e) => update("environment_production", e.target.value === "true")}
+                  >
+                    {ENV_TYPE_OPTIONS.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </ScrollSelect>
+                </label>
+                <label>
+                  <FieldLabel required>环境名称</FieldLabel>
+                  <input
+                    required
+                    value={form.environment}
+                    onChange={(e) => update("environment", e.target.value)}
+                    placeholder={form.environment_production ? "prod" : "dev"}
+                  />
+                </label>
+              </>
+            ) : (
+              <label>
+                <FieldLabel required>环境</FieldLabel>
+                <ScrollSelect
+                  required
+                  disabled={!form.project_key}
+                  loading={Boolean(form.project_key && optionsLoading.environments)}
+                  optionCount={environmentOptions.length + 1}
+                  value={form.environment}
+                  onChange={(e) => onEnvironmentChange(e.target.value)}
+                >
+                  <option value="">
+                    {form.project_key
+                      ? optionsLoading.environments
+                        ? "加载中…"
+                        : environmentOptions.length
+                          ? "请选择"
+                          : "当前项目暂无环境，请切换为「创建新环境」"
+                      : "请先选择项目"}
+                  </option>
+                  {environmentOptions.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </ScrollSelect>
+              </label>
+            )}
             <label className="span-2">
               <FieldLabel required>工作流名称</FieldLabel>
               <input
@@ -561,7 +674,10 @@ export default function ServiceAdd() {
             </label>
           </div>
           <p className="field-hint">
-            工作流名称默认为「服务名称-环境」，如 {suggestedWorkflowName || "my-service-dev"}。选择环境后会尝试自动填充集群与命名空间。
+            工作流名称默认为「服务名称-环境」，如 {suggestedWorkflowName || "my-service-dev"}。
+            {isNewEnvironment
+              ? ` 创建新环境时 Agent 将自动新建环境并部署服务，命名空间建议：${suggestedNamespace || "项目标识-环境"}。`
+              : " 选择已有环境后会尝试自动填充集群与命名空间。"}
           </p>
         </section>
 
@@ -608,7 +724,11 @@ export default function ServiceAdd() {
               />
             </label>
           </div>
-          {selectedCluster?.description ? (
+          {isNewEnvironment ? (
+            <p className="field-hint">
+              创建新环境时需指定集群与命名空间。命名空间建议：{suggestedNamespace || "项目标识-环境"}
+            </p>
+          ) : selectedCluster?.description ? (
             <p className="field-hint">{selectedCluster.description}</p>
           ) : null}
         </section>
@@ -820,7 +940,17 @@ export default function ServiceAdd() {
         </section>
 
         <div className="form-actions sticky-actions">
-          <button type="submit" className="primary-btn" disabled={saving || serviceCheck.exists || !form.project_key}>
+          <button
+            type="submit"
+            className="primary-btn"
+            disabled={
+              saving ||
+              serviceCheck.exists ||
+              !form.project_key ||
+              !form.environment ||
+              (!isNewEnvironment && environmentOptions.length === 0)
+            }
+          >
             {saving ? "提交中…" : "提交申请"}
           </button>
         </div>

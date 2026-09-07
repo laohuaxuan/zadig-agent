@@ -14,12 +14,16 @@ export function clusterOptionLabel(item) {
   return withAuxLabel(item?.name, item?.description);
 }
 
-export function registryOptionLabel(item) {
+export function registryFullPath(item) {
   const id = String(item?.registry_id || item?.id || "");
-  const address = String(item?.address || "").trim();
+  const address = String(item?.address || item?.url || "").trim().replace(/\/+$/, "");
   const namespace = String(item?.namespace || "").trim();
-  const base = address && namespace ? `${namespace}/${address}` : address || namespace || id;
-  return withAuxLabel(base || id, item?.remark);
+  if (address && namespace) return `${address}/${namespace}`;
+  return address || namespace || id || "—";
+}
+
+export function registryOptionLabel(item) {
+  return withAuxLabel(registryFullPath(item), item?.remark);
 }
 
 export function serviceTemplateOptionLabel(item) {

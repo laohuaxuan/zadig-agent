@@ -16,6 +16,7 @@ class CardActionEvent:
     action: str
     token: str
     event_token: str
+    app: str = ""
     v1: bool = False
 
 
@@ -67,6 +68,7 @@ def _card_action_from_maps(scope: dict[str, Any], action: dict[str, Any]) -> Car
         action=_any_string(value_map.get("action")),
         token=_any_string(value_map.get("token")),
         event_token=_any_string(scope.get("token")),
+        app=_any_string(value_map.get("app")),
     )
 
 

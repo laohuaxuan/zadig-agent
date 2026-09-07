@@ -381,10 +381,12 @@ export default function WorkflowPanel() {
   );
 
   useEffect(() => {
+    const app = searchParams.get("app");
     const raw = Number(searchParams.get("instance") || 0);
-    if (raw > 0) {
+    if (raw > 0 && (!app || app === "zadig-agent")) {
       setSelectedId(raw);
       searchParams.delete("instance");
+      searchParams.delete("app");
       setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams, setSearchParams]);

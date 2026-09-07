@@ -205,6 +205,10 @@ def _build_form_data(payload: dict[str, Any]) -> list[dict[str, str]]:
             {"label": "项目标识", "value": str(payload.get("project_key") or "")},
             {"label": "服务名称", "value": str(payload.get("service_name") or "")},
             {"label": "环境", "value": str(payload.get("environment") or "")},
+            {
+                "label": "环境类型",
+                "value": "生产环境" if payload.get("environment_production") else "测试环境",
+            },
             {"label": "工作流名称", "value": str(payload.get("workflow_name") or "")},
             {"label": "集群", "value": str(payload.get("cluster_name") or "")},
             {"label": "命名空间", "value": str(payload.get("namespace") or "")},

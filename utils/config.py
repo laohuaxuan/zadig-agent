@@ -169,6 +169,12 @@ def feishu_config() -> dict:
         dept_ids = ["0"]
     return {
         "app_base_url": str(raw.get("app_base_url") or "http://127.0.0.1:5173").strip().rstrip("/"),
+        "app_namespace": str(raw.get("app_namespace") or "zadig-agent").strip(),
+        "peer_app_base_urls": {
+            str(key).strip(): str(value).strip().rstrip("/")
+            for key, value in (raw.get("peer_app_base_urls") or {}).items()
+            if str(key).strip() and str(value).strip()
+        },
         "app_id": str(raw.get("app_id") or "").strip(),
         "app_secret": str(raw.get("app_secret") or "").strip(),
         "oauth_redirect_uri": str(raw.get("oauth_redirect_uri") or "").strip(),

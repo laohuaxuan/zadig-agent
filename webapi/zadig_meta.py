@@ -830,6 +830,7 @@ def _validate_add_service_input(payload: dict[str, Any]) -> dict[str, Any]:
     service_name = str(payload.get("service_name") or "").strip()
     template_name = str(payload.get("template_name") or "").strip()
     environment = str(payload.get("environment") or "dev").strip().lower()
+    environment_production = bool(payload.get("environment_production", False))
     workflow_name = str(payload.get("workflow_name") or "").strip()
     cluster_name = str(payload.get("cluster_name") or "").strip()
     namespace = str(payload.get("namespace") or "").strip()
@@ -874,6 +875,7 @@ def _validate_add_service_input(payload: dict[str, Any]) -> dict[str, Any]:
         "service_name": service_name,
         "template_name": template_name,
         "environment": environment,
+        "environment_production": environment_production,
         "workflow_name": workflow_name,
         "cluster_name": cluster_name,
         "namespace": namespace,
@@ -944,7 +946,7 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
         "parameters": build_parameters,
     }
     registry_id = _resolve_default_registry_id()
-    production = False
+    production = bool(data.get("environment_production", False))
     existing_envs = list_project_environments(data["project_key"], production=production)
     env_exists = any(item["env_name"] == env_name for item in existing_envs)
     workflow = {

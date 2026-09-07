@@ -9,6 +9,7 @@ from typing import Any
 
 from utils.db import query, query_one
 from webapi.approval_tokens import generate_approval_token
+from webapi.feishu_app import feishu_app_namespace
 from webapi.feishu_cards import build_approval_card, build_cc_card, build_status_card
 from webapi.feishu_client import FeishuClient
 from webapi.platform_users import get_user_by_id, persist_feishu_open_id_if_empty
@@ -23,7 +24,8 @@ def _workflow_instance_link(instance_id: int) -> str:
     base = str(_feishu.cfg.get("app_base_url") or "").strip().rstrip("/")
     if not base or instance_id <= 0:
         return ""
-    return f"{base}/workflows?instance={instance_id}"
+    app = feishu_app_namespace(_feishu.cfg)
+    return f"{base}/workflows?app={app}&instance={instance_id}"
 
 
 def _parse_form_data(instance: dict[str, Any]) -> list[dict[str, str]]:
@@ -129,6 +131,7 @@ async def _notify_feishu_approver(
         reject_token=reject_token,
         approve_url=_feishu.approval_action_url(api_base, approve_token) if api_base else "",
         reject_url=_feishu.approval_action_url(api_base, reject_token) if api_base else "",
+        app_namespace=feishu_app_namespace(_feishu.cfg),
     )
     try:
         message_id = await _feishu.send_interactive_card(open_id, card)

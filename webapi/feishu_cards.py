@@ -14,8 +14,11 @@ def _disabled_button(label: str) -> dict[str, Any]:
     return {"tag": "button", "type": "default", "text": _plain_text(label), "disabled": True}
 
 
-def _callback_button(label: str, btn_type: str, value: dict[str, Any]) -> dict[str, Any]:
-    action = str(value.get("action") or "").strip()
+def _callback_button(label: str, btn_type: str, value: dict[str, Any], *, app: str = "") -> dict[str, Any]:
+    payload = dict(value)
+    if app.strip():
+        payload["app"] = app.strip()
+    action = str(payload.get("action") or "").strip()
     element_id = f"btn_{action}" if action else "btn_callback"
     type_map = {"primary": "primary_filled", "danger": "danger_filled"}
     return {
@@ -24,7 +27,7 @@ def _callback_button(label: str, btn_type: str, value: dict[str, Any]) -> dict[s
         "element_id": element_id,
         "width": "fill",
         "text": _plain_text(label),
-        "behaviors": [{"type": "callback", "value": _callback_value_object(value)}],
+        "behaviors": [{"type": "callback", "value": _callback_value_object(payload)}],
     }
 
 
@@ -132,6 +135,7 @@ def build_approval_card(
     reject_token: str = "",
     approve_url: str = "",
     reject_url: str = "",
+    app_namespace: str = "",
     clicked_action: str = "",
     result_status: str = "",
     result_message: str = "",
@@ -157,11 +161,25 @@ def build_approval_card(
         actions = [_disabled_button("审批通过"), _disabled_button("拒绝")]
     elif not result_status.strip():
         if approve_token:
-            actions.append(_callback_button("审批通过", "primary", {"action": "approve", "token": approve_token}))
+            actions.append(
+                _callback_button(
+                    "审批通过",
+                    "primary",
+                    {"action": "approve", "token": approve_token},
+                    app=app_namespace,
+                )
+            )
         elif approve_url:
             actions.append(_url_button("审批通过", "primary", approve_url))
         if reject_token:
-            actions.append(_callback_button("拒绝", "danger", {"action": "reject", "token": reject_token}))
+            actions.append(
+                _callback_button(
+                    "拒绝",
+                    "danger",
+                    {"action": "reject", "token": reject_token},
+                    app=app_namespace,
+                )
+            )
         elif reject_url:
             actions.append(_url_button("拒绝", "danger", reject_url))
     if actions:
