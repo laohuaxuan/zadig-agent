@@ -25,6 +25,13 @@ def format_llm_error(raw: object) -> str:
             "或在 Deployment 中为 Pod 配置 HTTP_PROXY / HTTPS_PROXY 走允许网段的代理。"
         )
 
+    if 'messages" in request are illegal' in lowered or "invalid_prompt" in lowered:
+        return (
+            "模型网关拒绝了对话消息格式（常见于 free-router 多轮工具调用）。"
+            "请升级 zadig-agent 至最新版本（已自动规范化 tool 消息与 assistant/tool_calls 格式）；"
+            "若仍失败，可尝试更换模型或 Agent 网关。"
+        )
+
     code_match = re.search(r"Error code:\s*(\d+)", text)
     if code_match and code_match.group(1) == "457":
         return format_llm_error("ip_not_allowed")

@@ -3,13 +3,29 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from langchain_core.language_models import LanguageModelInput
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
+from model.message_compat import sanitize_openai_gateway_payload
 from utils.config import openrouter_config
 
 _llm: ChatOpenAI | None = None
 _llm_fingerprint: tuple[str, str, str, str] | None = None
+
+
+class GatewayCompatChatOpenAI(ChatOpenAI):
+    """ChatOpenAI with payload fixes for strict agent gateways (free-router, etc.)."""
+
+    def _get_request_payload(
+        self,
+        input_: LanguageModelInput,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict:
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        return sanitize_openai_gateway_payload(payload)
 
 
 def new_llm_session_id(prefix: str = "zadig-agent") -> str:
@@ -32,12 +48,12 @@ def llm_session_extra_body(session_id: str) -> dict[str, Any]:
     return {"session_id": sid}
 
 
-def create_chat_llm(*, session_id: str) -> ChatOpenAI:
+def create_chat_llm(*, session_id: str) -> GatewayCompatChatOpenAI:
     """按 session 创建 LLM 客户端（free-router 等网关要求 agent 请求带 session_id）。"""
     cfg = openrouter_config()
     sid = str(session_id or "").strip()[:256] or new_llm_session_id()
     headers = {"Accept-Encoding": "identity", **llm_session_headers(sid)}
-    return ChatOpenAI(
+    return GatewayCompatChatOpenAI(
         model=cfg["model"],
         base_url=cfg["base_url"],
         api_key=SecretStr(cfg["api_key"]),
@@ -47,7 +63,7 @@ def create_chat_llm(*, session_id: str) -> ChatOpenAI:
     )
 
 
-def get_openrouter_llm(*, session_id: str | None = None) -> ChatOpenAI:
+def get_openrouter_llm(*, session_id: str | None = None) -> GatewayCompatChatOpenAI:
     """按当前可用 Agent 返回 ChatOpenAI；传入 session_id 时按执行会话创建客户端。"""
     if session_id:
         return create_chat_llm(session_id=session_id)
