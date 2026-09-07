@@ -16,7 +16,7 @@ const CONFIG = {
       { key: "display_name", label: "名称", truncate: true },
       { key: "name", label: "标识", truncate: true },
       { key: "description", label: "描述", truncate: true },
-      { key: "updated_at", label: "更新时间" },
+      { key: "updated_at", label: "更新时间", truncate: true },
     ],
   },
   mcp: {
@@ -30,9 +30,9 @@ const CONFIG = {
       { key: "display_name", label: "名称", truncate: true },
       { key: "name", label: "标识", truncate: true },
       { key: "description", label: "描述", truncate: true },
-      { key: "source", label: "来源" },
-      { key: "module", label: "模块" },
-      { key: "transport", label: "传输" },
+      { key: "source", label: "来源", truncate: true },
+      { key: "module", label: "模块", truncate: true },
+      { key: "transport", label: "传输", truncate: true },
     ],
   },
 };
@@ -104,7 +104,7 @@ export default function SkillList({ kind }) {
         </div>
       ) : (
         <div className="table-wrap">
-          <table className="skill-list-table">
+          <table className={`skill-list-table${kind === "mcp" ? " mcp-skill-table" : ""}`}>
             <thead>
               <tr>
                 {config.columns.map((col) => (

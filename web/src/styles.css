@@ -692,31 +692,91 @@ th {
   text-align: center;
 }
 
-.skill-list-table {
+.skill-list-table,
+.data-list-table {
   table-layout: fixed;
+  width: 100%;
 }
 
-.skill-list-table .col-truncate.col-display_name {
-  width: 16%;
-}
-
-.skill-list-table .col-truncate.col-name {
+.skill-list-table .col-truncate.col-display_name,
+.data-list-table .col-truncate.col-display_name,
+.data-list-table .col-truncate.col-name {
   width: 14%;
 }
 
+.skill-list-table .col-truncate.col-name {
+  width: 12%;
+}
+
 .skill-list-table .col-truncate.col-description {
-  width: 32%;
+  width: 30%;
+}
+
+.skill-list-table.mcp-skill-table .col-truncate.col-description {
+  width: 18%;
+}
+
+.skill-list-table .col-truncate.col-module {
+  width: 16%;
+}
+
+.skill-list-table .col-truncate.col-source,
+.skill-list-table .col-truncate.col-transport {
+  width: 8%;
+}
+
+.skill-list-table .col-truncate.col-updated_at {
+  width: 14%;
+}
+
+.data-list-table .col-truncate.col-model,
+.data-list-table .col-truncate.col-backup {
+  width: 12%;
+}
+
+.data-list-table .col-truncate.col-base_url {
+  width: 22%;
+}
+
+.data-list-table .col-truncate.col-api_key {
+  width: 14%;
+}
+
+.data-list-table .col-truncate.col-remark {
+  width: 14%;
+}
+
+.data-list-table .col-truncate.col-email {
+  width: 18%;
+}
+
+.data-list-table .col-truncate.col-phone {
+  width: 12%;
+}
+
+.data-list-table .col-status,
+.data-list-table .col-source,
+.data-list-table .col-role {
+  width: 10%;
 }
 
 .skill-list-table .col-actions,
-.skill-list-table td.row-actions {
+.skill-list-table td.row-actions,
+.data-list-table .col-actions,
+.data-list-table td.row-actions {
   width: 112px;
+  max-width: none;
+  white-space: nowrap;
 }
 
-.skill-list-table td.cell-truncate {
+.skill-list-table th.col-truncate,
+.skill-list-table td.cell-truncate,
+.data-list-table th.col-truncate,
+.data-list-table td.cell-truncate {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 1px;
 }
 
 .total {

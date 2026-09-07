@@ -633,16 +633,39 @@ def _build_service_row(data: dict[str, Any]) -> dict[str, Any]:
     return service_row
 
 
+def _init_helm_service_row(service_row: dict[str, Any]) -> dict[str, Any]:
+    """Project init API only accepts values_yaml; Git import is env-level."""
+    return {key: value for key, value in service_row.items() if key != "import_values_from_git"}
+
+
+def _build_helm_env_service(data: dict[str, Any], service_row: dict[str, Any]) -> dict[str, Any] | None:
+    imported = service_row.get("import_values_from_git")
+    if not imported:
+        return None
+    return {
+        "project_key": data["project_key"],
+        "env_name": data["environment"],
+        "services": [
+            {
+                "service_name": data["service_name"],
+                "deploy_strategy": "deploy",
+                "import_values_from_git": imported,
+            }
+        ],
+    }
+
+
 def build_project_plan(payload: dict[str, Any]) -> dict[str, Any]:
     data = _validate_project_input(payload)
     service_row = _build_service_row(data)
+    helm_env_service = _build_helm_env_service(data, service_row)
     build_parameters = _normalize_build_parameters(data["build_variables"])
     helm_project = {
         "project_name": data["project_name"],
         "project_key": data["project_key"],
         "is_public": False,
         "description": "",
-        "service_list": [service_row],
+        "service_list": [_init_helm_service_row(service_row)],
         "env_list": [
             {
                 "env_key": data["environment"],
@@ -757,15 +780,18 @@ def build_project_plan(payload: dict[str, Any]) -> dict[str, Any]:
         ],
         "skill_name": "create_helm_project",
     }
+    agent: dict[str, Any] = {
+        "helm_project": helm_project,
+        "build": build,
+        "role_bindings": role_bindings,
+        "workflow": workflow,
+    }
+    if helm_env_service:
+        agent["helm_env_service"] = helm_env_service
     result: dict[str, Any] = {
         "project_key": data["project_key"],
         "preview": preview,
-        "agent": {
-            "helm_project": helm_project,
-            "build": build,
-            "role_bindings": role_bindings,
-            "workflow": workflow,
-        },
+        "agent": agent,
     }
     try:
         from webapi.agent_resources import public_execution_context, resolve_execution_resources
@@ -880,12 +906,14 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
     if service_row.get("values_yaml"):
         helm_service["values_yaml"] = service_row["values_yaml"]
 
-    env_service: dict[str, Any] = {
-        "service_name": data["service_name"],
-        "deploy_strategy": "deploy",
-    }
-    if service_row.get("import_values_from_git"):
-        env_service["import_values_from_git"] = service_row["import_values_from_git"]
+    env_name = data["environment"]
+    helm_env_service = _build_helm_env_service(data, service_row)
+    if not helm_env_service:
+        helm_env_service = {
+            "project_key": data["project_key"],
+            "env_name": env_name,
+            "services": [{"service_name": data["service_name"], "deploy_strategy": "deploy"}],
+        }
 
     build = {
         "project_key": data["project_key"],
@@ -916,7 +944,6 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
         "parameters": build_parameters,
     }
     registry_id = _resolve_default_registry_id()
-    env_name = data["environment"]
     production = False
     existing_envs = list_project_environments(data["project_key"], production=production)
     env_exists = any(item["env_name"] == env_name for item in existing_envs)
@@ -934,11 +961,7 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
     agent: dict[str, Any] = {
         "env_exists": env_exists,
         "helm_service": helm_service,
-        "helm_env_service": {
-            "project_key": data["project_key"],
-            "env_name": env_name,
-            "services": [env_service],
-        },
+        "helm_env_service": helm_env_service,
         "build": build,
         "workflow": workflow,
     }

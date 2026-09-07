@@ -160,7 +160,11 @@ def _required_tools_for_plan(payload: dict[str, Any], plan: dict[str, Any]) -> l
             "create_build",
             "create_workflow",
         ]
-    return ["create_helm_project", "create_build", "create_workflow"]
+    agent = plan.get("agent") or {}
+    tools = ["create_helm_project", "create_build", "create_workflow"]
+    if agent.get("helm_env_service"):
+        tools = ["create_helm_project", "add_helm_services", "create_build", "create_workflow"]
+    return tools
 
 
 def _successful_tool_names(messages: list[Any]) -> set[str]:

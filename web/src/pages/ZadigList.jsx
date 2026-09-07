@@ -79,15 +79,15 @@ export default function ZadigList() {
         </div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="data-list-table">
             <thead>
               <tr>
-                <th>名称</th>
-                <th>备注</th>
-                <th>Base URL</th>
-                <th>API Token</th>
-                <th>状态</th>
-                <th>操作</th>
+                <th className="col-truncate col-name">名称</th>
+                <th className="col-truncate col-remark">备注</th>
+                <th className="col-truncate col-base_url">Base URL</th>
+                <th className="col-truncate col-api_key">API Token</th>
+                <th className="col-status">状态</th>
+                <th className="col-actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -100,13 +100,19 @@ export default function ZadigList() {
               ) : (
                 state.items.map((row) => (
                   <tr key={row.id || row.base_url}>
-                    <td>
+                    <td className="cell-truncate" title={row.name || undefined}>
                       {row.name || "—"}
                       {row.is_active ? <span className="tag">生效中</span> : null}
                     </td>
-                    <td>{row.remark || "—"}</td>
-                    <td>{row.base_url || "—"}</td>
-                    <td>{row.api_token_masked || "—"}</td>
+                    <td className="cell-truncate" title={row.remark || undefined}>
+                      {row.remark || "—"}
+                    </td>
+                    <td className="cell-truncate" title={row.base_url || undefined}>
+                      {row.base_url || "—"}
+                    </td>
+                    <td className="cell-truncate" title={row.api_token_masked || undefined}>
+                      {row.api_token_masked || "—"}
+                    </td>
                     <td>
                       <span className={`status ${row.available ? "ok" : "bad"}`}>
                         {row.available ? "可用" : row.error || "不可用"}

@@ -9,7 +9,7 @@ const COLUMNS = [
   { key: "name", label: "标识", truncate: true },
   { key: "category", label: "类型" },
   { key: "description", label: "描述", truncate: true },
-  { key: "updated_at", label: "更新时间" },
+  { key: "updated_at", label: "更新时间", truncate: true },
 ];
 
 const CATEGORY_LABEL = {

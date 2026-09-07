@@ -79,16 +79,16 @@ export default function AgentList() {
         </div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="data-list-table">
             <thead>
               <tr>
-                <th>名称</th>
-                <th>主模型</th>
-                <th>备用模型</th>
-                <th>Base URL</th>
-                <th>API Key</th>
-                <th>状态</th>
-                <th>操作</th>
+                <th className="col-truncate col-name">名称</th>
+                <th className="col-truncate col-model">主模型</th>
+                <th className="col-truncate col-backup">备用模型</th>
+                <th className="col-truncate col-base_url">Base URL</th>
+                <th className="col-truncate col-api_key">API Key</th>
+                <th className="col-status">状态</th>
+                <th className="col-actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -101,14 +101,22 @@ export default function AgentList() {
               ) : (
                 state.items.map((row) => (
                   <tr key={row.id}>
-                    <td>
+                    <td className="cell-truncate" title={row.name || undefined}>
                       {row.name}
                       {row.is_default ? <span className="tag">默认</span> : null}
                     </td>
-                    <td>{row.primary_model || row.model || "—"}</td>
-                    <td>{row.backup_models?.length ? row.backup_models.join("、") : "—"}</td>
-                    <td>{row.base_url || "—"}</td>
-                    <td>{row.api_key_masked || "—"}</td>
+                    <td className="cell-truncate" title={row.primary_model || row.model || undefined}>
+                      {row.primary_model || row.model || "—"}
+                    </td>
+                    <td className="cell-truncate" title={row.backup_models?.length ? row.backup_models.join("、") : undefined}>
+                      {row.backup_models?.length ? row.backup_models.join("、") : "—"}
+                    </td>
+                    <td className="cell-truncate" title={row.base_url || undefined}>
+                      {row.base_url || "—"}
+                    </td>
+                    <td className="cell-truncate" title={row.api_key_masked || undefined}>
+                      {row.api_key_masked || "—"}
+                    </td>
                     <td className="agent-status-cell">
                       <span
                         className={`status ${row.available ? "ok" : "bad"}`}

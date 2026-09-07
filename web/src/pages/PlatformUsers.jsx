@@ -159,16 +159,16 @@ export default function PlatformUsers() {
         />
       </div>
       <div className="table-wrap">
-        <table>
+        <table className="data-list-table">
           <thead>
             <tr>
-              <th>用户名</th>
-              <th>显示名</th>
-              <th>来源</th>
-              <th>手机号</th>
-              <th>邮箱</th>
-              <th>角色</th>
-              <th>操作</th>
+              <th className="col-truncate col-name">用户名</th>
+              <th className="col-truncate col-display_name">显示名</th>
+              <th className="col-source">来源</th>
+              <th className="col-truncate col-phone">手机号</th>
+              <th className="col-truncate col-email">邮箱</th>
+              <th className="col-role">角色</th>
+              <th className="col-actions">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -183,18 +183,25 @@ export default function PlatformUsers() {
                 {items.map((item) => {
                   const isSelf = Number(item.id) === Number(user?.id);
                   const offline = item.status === "disabled";
+                  const email = displayUserEmail(item);
                   return (
                     <tr key={item.id} className={offline ? "row-disabled" : ""}>
-                      <td>
+                      <td className="cell-truncate" title={item.name || undefined}>
                         {item.name}
                         {offline ? <span className="status-tag">已下线</span> : null}
                       </td>
-                      <td>{item.display_name || item.name}</td>
+                      <td className="cell-truncate" title={item.display_name || item.name || undefined}>
+                        {item.display_name || item.name}
+                      </td>
                       <td>{authSourceLabel(item)}</td>
-                      <td>{item.phone || ""}</td>
-                      <td>{displayUserEmail(item)}</td>
+                      <td className="cell-truncate" title={item.phone || undefined}>
+                        {item.phone || ""}
+                      </td>
+                      <td className="cell-truncate" title={email || undefined}>
+                        {email}
+                      </td>
                       <td>{item.role_label || roleLabel(item.role)}</td>
-                      <td>
+                      <td className="row-actions">
                         {canModifyUsers ? (
                           <>
                             <button

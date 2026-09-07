@@ -97,13 +97,15 @@ export default function ResourcePage() {
         </div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="data-list-table">
             <thead>
               <tr>
                 {resource.columns.map((col) => (
-                  <th key={col.key}>{col.label}</th>
+                  <th key={col.key} className="col-truncate">
+                    {col.label}
+                  </th>
                 ))}
-                {showActions ? <th>操作</th> : null}
+                {showActions ? <th className="col-actions">操作</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -116,11 +118,15 @@ export default function ResourcePage() {
               ) : (
                 items.map((row, index) => (
                   <tr key={row.resource_key || row.uid || row.cluster_id || row.registry_id || row.id || index}>
-                    {resource.columns.map((col) => (
-                      <td key={col.key}>
-                        {col.render ? col.render(row[col.key], row) : row[col.key] || "—"}
-                      </td>
-                    ))}
+                    {resource.columns.map((col) => {
+                      const value = col.render ? col.render(row[col.key], row) : row[col.key] || "—";
+                      const text = value === null || value === undefined || value === "" ? "—" : String(value);
+                      return (
+                        <td key={col.key} className="cell-truncate" title={text !== "—" ? text : undefined}>
+                          {col.render ? value : text}
+                        </td>
+                      );
+                    })}
                     {showActions ? (
                       <td className="row-actions">
                         <button
