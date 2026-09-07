@@ -522,6 +522,23 @@ def service_exists_in_environment(
     return any(name.lower() == target for name in names)
 
 
+def find_service_environment_in_type(
+    project_key: str,
+    service_name: str,
+    *,
+    production: bool = False,
+) -> str | None:
+    key = str(project_key or "").strip()
+    name = str(service_name or "").strip()
+    if not key or not name:
+        return None
+    for env_item in list_project_environments(key, production=production):
+        env_name = env_item["env_name"]
+        if service_exists_in_environment(key, env_name, name, production=production):
+            return env_name
+    return None
+
+
 def build_exists_for_service(project_key: str, service_name: str) -> bool:
     return _resolve_build_for_service(project_key, service_name) is not None
 
@@ -558,16 +575,27 @@ def check_add_service_constraints(
             "message": f"请先在测试环境创建服务「{name}」（含构建），再添加生产环境服务",
         }
 
-    if env and mode != "new":
-        if environment_exists_in_project(key, env, production=environment_production):
-            if service_exists_in_environment(key, env, name, production=environment_production):
-                return {
-                    **result,
-                    "blocked": True,
-                    "exists": True,
-                    "reason": "same_env",
-                    "message": f"当前已选环境「{env}」中存在相同名称的服务「{name}」",
-                }
+    env_type_label = "生产环境" if environment_production else "测试环境"
+    existing_env = find_service_environment_in_type(key, name, production=environment_production)
+    if existing_env:
+        if env and existing_env == env and mode != "new":
+            return {
+                **result,
+                "blocked": True,
+                "exists": True,
+                "reason": "same_env",
+                "message": f"当前已选环境「{env}」中存在相同名称的服务「{name}」",
+            }
+        return {
+            **result,
+            "blocked": True,
+            "exists": True,
+            "reason": "same_env_type",
+            "message": (
+                f"相同{env_type_label}类型的环境中已存在相同名称的服务「{name}」"
+                f"（环境：{existing_env}）"
+            ),
+        }
 
     return result
 

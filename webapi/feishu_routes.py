@@ -188,7 +188,7 @@ async def feishu_card_callback_process(request: Request) -> JSONResponse:
     return await _handle_feishu_card_callback(request, skip_route=True)
 
 
-@router.get("/api/feishu/approval/action", response_class=HTMLResponse)
+@router.get("/api/feishu/approval/action", response_class=HTMLResponse, response_model=None)
 def feishu_approval_action(token: str = "") -> HTMLResponse | RedirectResponse:
     cfg = feishu_config()
     local_app = feishu_app_namespace(cfg)
