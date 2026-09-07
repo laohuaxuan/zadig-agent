@@ -548,12 +548,16 @@ async def api_workflow_approve(instance_id: int, body: WorkflowActionBody, user:
 
 
 @router.get("/api/workflows/instances/{instance_id}/execute/stream")
-async def api_workflow_execute_stream(instance_id: int, user: CurrentUser = Depends(get_current_user)) -> StreamingResponse:
+async def api_workflow_execute_stream(
+    instance_id: int,
+    resume: bool = False,
+    user: CurrentUser = Depends(get_current_user),
+) -> StreamingResponse:
     import json
 
     async def event_stream():
         try:
-            async for event in stream_application_execution(instance_id, user.user_id):
+            async for event in stream_application_execution(instance_id, user.user_id, resume=resume):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except (LookupError, PermissionError, ValueError) as exc:
             payload = {"type": "error", "message": str(exc)}

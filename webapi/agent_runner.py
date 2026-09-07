@@ -15,6 +15,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
 
 from model.openrouter import get_openrouter_llm, new_llm_session_id
+from tools.file_saver import FileSaver, has_checkpoint
 from utils.llm_errors import format_llm_error
 from utils.mcp import get_zadig_mcp_tools
 from webapi.agent_resources import (
@@ -217,19 +218,36 @@ def _last_ai_message(messages: list[Any]) -> AIMessage | None:
     return None
 
 
+def _load_checkpoint_messages(checkpointer: FileSaver, thread_id: str) -> list[Any]:
+    tup = checkpointer.get_tuple(RunnableConfig(configurable={"thread_id": thread_id}))
+    if not tup:
+        return []
+    values = tup.checkpoint.get("channel_values") or {}
+    messages = values.get("messages") or []
+    return list(messages) if isinstance(messages, list) else []
+
+
 async def _stream_agent_round(
     agent: Any,
-    conversation: list[Any],
+    new_messages: list[Any],
     config: RunnableConfig,
     *,
     log_fn: LogCallback | None,
     step_offset: int,
+    resume_from_checkpoint: bool = False,
 ) -> tuple[list[Any], int, float]:
-    new_messages: list[Any] = []
+    new_messages_out: list[Any] = []
     step_no = step_offset
     last_tool_time = time.time()
 
-    async for chunk in agent.astream({"messages": conversation}, config=config):
+    if resume_from_checkpoint:
+        stream_input = None
+    elif new_messages:
+        stream_input = {"messages": new_messages}
+    else:
+        stream_input = {"messages": []}
+
+    async for chunk in agent.astream(stream_input, config=config):
         step_no += 1
         await _emit_log(log_fn, _format_step_header(step_no))
         for _node_name, node_output in chunk.items():
@@ -237,7 +255,7 @@ async def _stream_agent_round(
             if not batch:
                 continue
             for msg in batch:
-                new_messages.append(msg)
+                new_messages_out.append(msg)
                 if isinstance(msg, AIMessage):
                     if msg.content:
                         await _emit_log(log_fn, _format_ai_think(str(msg.content)))
@@ -256,7 +274,7 @@ async def _stream_agent_round(
                     )
 
     total_duration = time.time() - last_tool_time
-    return new_messages, step_no, total_duration
+    return new_messages_out, step_no, total_duration
 
 
 async def run_project_create_agent(
@@ -264,6 +282,8 @@ async def run_project_create_agent(
     *,
     log_fn: LogCallback | None = None,
     input_fn: InputCallback | None = None,
+    thread_id: str | None = None,
+    resume: bool = False,
 ) -> dict[str, Any]:
     plan = build_application_plan(payload)
     resources = resolve_execution_resources(payload, plan)
@@ -314,45 +334,68 @@ async def run_project_create_agent(
             f"仅在需要用户确认参数、选择或关键操作前，在回复末尾单独一行输出 `{_CONFIRM_MARKER}`。"
             "任务全部完成后的最终总结不要加此标记。"
         )
-        session_id = new_llm_session_id("zadig-agent")
+        checkpoint_thread_id = str(thread_id or new_llm_session_id("zadig-agent"))
+        checkpointer = FileSaver()
+        execution_context["checkpoint_thread_id"] = checkpoint_thread_id
         agent = create_react_agent(
-            model=get_openrouter_llm(session_id=session_id).bind_tools(tools),
+            model=get_openrouter_llm(session_id=checkpoint_thread_id).bind_tools(tools),
             tools=tools,
             prompt=system_prompt,
+            checkpointer=checkpointer,
         )
         config = RunnableConfig(
-            configurable={"thread_id": session_id},
+            configurable={"thread_id": checkpoint_thread_id},
             recursion_limit=40,
         )
-        conversation: list[Any] = [
-            HumanMessage(
-                content=(
-                    "请开始执行添加 Helm 工作流计划。"
-                    if is_add_workflow
-                    else "请开始执行添加 Helm 服务计划。"
-                    if is_add_service
-                    else "请开始执行创建 Helm Chart 项目计划。"
-                )
-            )
-        ]
-        await _emit_log(log_fn, "正在调用模型推理...\n")
+        start_message = (
+            "请开始执行添加 Helm 工作流计划。"
+            if is_add_workflow
+            else "请开始执行添加 Helm 服务计划。"
+            if is_add_service
+            else "请开始执行创建 Helm Chart 项目计划。"
+        )
+        all_messages = _load_checkpoint_messages(checkpointer, checkpoint_thread_id) if resume else []
         step_offset = 0
+        pending_user_reply: HumanMessage | None = None
+        resume_from_checkpoint = False
+
+        if resume and has_checkpoint(checkpoint_thread_id):
+            await _emit_log(log_fn, "♻️ 从 checkpoint 恢复 Agent 会话...\n")
+            last_ai = _last_ai_message(all_messages)
+            if last_ai and _needs_user_confirmation(last_ai):
+                prompt = _confirmation_prompt(last_ai)
+                await _emit_log(log_fn, f"\n⏸ 恢复会话，等待用户确认：\n{prompt}\n")
+                if not input_fn:
+                    raise ValueError("Agent 需要用户确认，但未提供交互通道")
+                reply = str(await input_fn(prompt)).strip()
+                if not reply:
+                    raise ValueError("用户确认内容不能为空")
+                await _emit_log(log_fn, f"👤 用户：{reply}\n")
+                pending_user_reply = HumanMessage(content=reply)
+            else:
+                resume_from_checkpoint = True
+        else:
+            pending_user_reply = HumanMessage(content=start_message)
+
+        await _emit_log(log_fn, "正在调用模型推理...\n")
 
         while True:
             try:
                 round_messages, step_offset, _duration = await _stream_agent_round(
                     agent,
-                    conversation,
+                    [pending_user_reply] if pending_user_reply else [],
                     config,
                     log_fn=log_fn,
                     step_offset=step_offset,
+                    resume_from_checkpoint=resume_from_checkpoint,
                 )
             except Exception as exc:
                 await _emit_log(log_fn, f"\n❌ 模型调用失败：{format_llm_error(exc)}\n")
                 raise
-            conversation.extend(round_messages)
+            pending_user_reply = None
+            resume_from_checkpoint = False
             all_messages.extend(round_messages)
-            last_ai = _last_ai_message(round_messages)
+            last_ai = _last_ai_message(round_messages) or _last_ai_message(all_messages)
             if last_ai and _needs_user_confirmation(last_ai):
                 prompt = _confirmation_prompt(last_ai)
                 await _emit_log(log_fn, f"\n⏸ 等待用户确认：\n{prompt}\n")
@@ -362,7 +405,7 @@ async def run_project_create_agent(
                 if not reply:
                     raise ValueError("用户确认内容不能为空")
                 await _emit_log(log_fn, f"👤 用户：{reply}\n")
-                conversation.append(HumanMessage(content=reply))
+                pending_user_reply = HumanMessage(content=reply)
                 continue
             break
 

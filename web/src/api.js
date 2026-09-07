@@ -368,8 +368,9 @@ export function revokeWorkflow(id) {
 }
 
 export async function streamWorkflowExecution(instanceId, handlers = {}) {
-  const { onLog, onDone, onError, onInputRequired, onMeta, signal } = handlers;
-  const resp = await fetch(`/api/workflows/instances/${instanceId}/execute/stream`, {
+  const { onLog, onDone, onError, onInputRequired, onMeta, signal, resume = false } = handlers;
+  const query = resume ? "?resume=1" : "";
+  const resp = await fetch(`/api/workflows/instances/${instanceId}/execute/stream${query}`, {
     headers: withAuthHeaders(),
     credentials: "include",
     signal,

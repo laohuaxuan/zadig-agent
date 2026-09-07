@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ScrollSelect from "../components/ScrollSelect.jsx";
 import SearchableSelect from "../components/SearchableSelect.jsx";
+import SubmitToast from "../components/SubmitToast.jsx";
 import {
   checkProjectWorkflow,
   fetchProjectBuildServices,
@@ -274,6 +275,7 @@ export default function WorkflowAdd() {
           ? `添加工作流申请 ${item.serial_no} 已提交，等待审批`
           : `项目 ${payload.project_key} 添加工作流申请已提交`,
       );
+      window.scrollTo({ top: 0, behavior: "smooth" });
       resetForm();
     } catch (err) {
       setError(err.message);
@@ -284,6 +286,7 @@ export default function WorkflowAdd() {
 
   return (
     <section>
+      <SubmitToast message={success} onClose={() => setSuccess("")} />
       <h1 className="page-title">添加工作流</h1>
       <p className="page-desc">
         向已有 Helm 项目添加构建部署工作流，提交后将进入审批流程，审批通过后由 Agent 自动创建工作流。
@@ -306,11 +309,6 @@ export default function WorkflowAdd() {
       {error ? (
         <div className="banner error" role="alert">
           {error}
-        </div>
-      ) : null}
-      {success ? (
-        <div className="banner success" role="status">
-          {success}
         </div>
       ) : null}
       <form className="form-stack" onSubmit={onSubmit}>

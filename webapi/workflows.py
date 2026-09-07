@@ -794,6 +794,8 @@ def get_instance_detail(instance_id: int, user_id: int) -> dict[str, Any]:
     can_approve = pending_task is not None
     application = None
     application_status = ""
+    app_row = None
+    execution_context = None
     if instance.get("ref_record_id"):
         app_row = query_one(
             "SELECT * FROM project_applications WHERE record_id = %s",
@@ -816,9 +818,24 @@ def get_instance_detail(instance_id: int, user_id: int) -> dict[str, Any]:
                 "execution_context": execution_context,
                 "agent_meta": agent_meta if isinstance(agent_meta, dict) else None,
             }
-    from webapi.applications import can_execute_application, is_execution_awaiting_input
+    from webapi.applications import (
+        can_execute_application,
+        can_resume_application,
+        has_resumable_checkpoint,
+        is_execution_awaiting_input,
+        is_execution_running,
+    )
 
     awaiting_input = is_execution_awaiting_input(instance_id)
+    if execution_context is None and app_row:
+        execution_context = _parse_execution_context(app_row.get("execution_context_json"))
+    resumable = bool(
+        application_status == "执行中"
+        and (
+            is_execution_running(instance_id)
+            or has_resumable_checkpoint(instance_id, execution_context if isinstance(execution_context, dict) else None)
+        )
+    )
     is_readonly = status in {STATUS_REJECTED, STATUS_REVOKED} or (
         status == STATUS_COMPLETED and (not application or application_status == "已完成")
     )
@@ -870,9 +887,24 @@ def get_instance_detail(instance_id: int, user_id: int) -> dict[str, Any]:
                 instance_id=instance_id,
             )
         ),
+        "can_resume": bool(
+            application
+            and can_resume_application(
+                {
+                    "initiator_id": int(instance["initiator_id"]),
+                    "approval_status": application_status,
+                    "execution_context": execution_context if isinstance(execution_context, dict) else None,
+                },
+                initiator_id=user_id,
+                workflow_status=status,
+                instance_id=instance_id,
+            )
+        ),
         "is_readonly": is_readonly,
         "execution_session": {
             "awaiting_input": awaiting_input,
+            "resumable": resumable,
+            "running": is_execution_running(instance_id),
         },
         "permissions": {
             "can_approve": can_approve,
@@ -882,6 +914,19 @@ def get_instance_detail(instance_id: int, user_id: int) -> dict[str, Any]:
                 application
                 and can_execute_application(
                     {"initiator_id": int(instance["initiator_id"]), "approval_status": application_status},
+                    initiator_id=user_id,
+                    workflow_status=status,
+                    instance_id=instance_id,
+                )
+            ),
+            "can_resume": bool(
+                application
+                and can_resume_application(
+                    {
+                        "initiator_id": int(instance["initiator_id"]),
+                        "approval_status": application_status,
+                        "execution_context": execution_context if isinstance(execution_context, dict) else None,
+                    },
                     initiator_id=user_id,
                     workflow_status=status,
                     instance_id=instance_id,

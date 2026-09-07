@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
+from tools.file_saver import clear_thread_checkpoints, has_checkpoint, resolve_checkpoints_path
 from utils.db import _now, execute, query, query_one
 from utils.llm_errors import format_llm_error
 from webapi.agent_runner import (
@@ -27,8 +29,35 @@ _ACTIVE_DUPLICATE_STATUSES = ("待审批", "待执行", "执行中")
 _execution_input_queues: dict[int, asyncio.Queue[str]] = {}
 
 
+@dataclass
+class _ExecutionSession:
+    task: asyncio.Task[Any]
+    event_queues: list[asyncio.Queue[tuple[str, Any]]] = field(default_factory=list)
+    input_queue: asyncio.Queue[str] | None = None
+
+
+_execution_sessions: dict[int, _ExecutionSession] = {}
+
+
+def execution_thread_id(instance_id: int, execution_context: dict[str, Any] | None = None) -> str:
+    if execution_context:
+        thread_id = str(execution_context.get("checkpoint_thread_id") or "").strip()
+        if thread_id:
+            return thread_id
+    return str(instance_id)
+
+
+def has_resumable_checkpoint(instance_id: int, execution_context: dict[str, Any] | None = None) -> bool:
+    return has_checkpoint(execution_thread_id(instance_id, execution_context))
+
+
 def is_execution_awaiting_input(instance_id: int) -> bool:
     return int(instance_id) in _execution_input_queues
+
+
+def is_execution_running(instance_id: int) -> bool:
+    session = _execution_sessions.get(instance_id)
+    return session is not None and not session.task.done()
 
 
 def _payload_dict(raw: Any) -> dict[str, Any]:
@@ -145,6 +174,27 @@ def can_execute_application(
     if status == "执行中":
         return False
     return status in _EXECUTABLE_STATUSES
+
+
+def can_resume_application(
+    app: dict[str, Any] | None,
+    *,
+    initiator_id: int,
+    workflow_status: str,
+    instance_id: int = 0,
+) -> bool:
+    if not app or workflow_status != STATUS_COMPLETED:
+        return False
+    if int(app.get("initiator_id") or 0) != initiator_id:
+        return False
+    if str(app.get("approval_status") or "") != "执行中":
+        return False
+    if is_execution_running(instance_id):
+        return True
+    execution_context = app.get("execution_context")
+    if not isinstance(execution_context, dict):
+        execution_context = None
+    return has_resumable_checkpoint(instance_id, execution_context)
 
 
 def _build_form_data(payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -273,8 +323,9 @@ def _append_execution_log(app_id: int, chunk: str) -> None:
     )
 
 
-def _mark_execution_started(app_id: int) -> None:
+def _mark_execution_started(app_id: int, *, thread_id: str) -> None:
     now = _now()
+    clear_thread_checkpoints(thread_id)
     execute(
         """
         UPDATE project_applications
@@ -287,14 +338,26 @@ def _mark_execution_started(app_id: int) -> None:
 
 
 def reconcile_stale_execution(instance_id: int) -> None:
-    """无活跃执行会话但状态仍为「执行中」时，视为中断并标记失败。"""
+    """无活跃执行会话且无可恢复 checkpoint 时，将僵死的「执行中」标记为失败。"""
     if instance_id in _execution_input_queues:
         return
+    if is_execution_running(instance_id):
+        return
     row = query_one(
-        "SELECT id, approval_status FROM project_applications WHERE workflow_instance_id = %s",
+        "SELECT id, approval_status, execution_context_json FROM project_applications WHERE workflow_instance_id = %s",
         (instance_id,),
     )
     if not row or str(row.get("approval_status") or "") != "执行中":
+        return
+    execution_context = row.get("execution_context_json")
+    if isinstance(execution_context, str):
+        try:
+            execution_context = json.loads(execution_context or "null")
+        except json.JSONDecodeError:
+            execution_context = None
+    if not isinstance(execution_context, dict):
+        execution_context = None
+    if has_resumable_checkpoint(instance_id, execution_context):
         return
     app_id = int(row["id"])
     _append_execution_log(app_id, "\n❌ 执行已中断，请重新执行\n")
@@ -328,6 +391,29 @@ def _validate_execute_request(instance_id: int, user_id: int) -> tuple[dict[str,
     return instance, app_row, app
 
 
+def _validate_resume_request(instance_id: int, user_id: int) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    instance = query_one("SELECT * FROM workflow_instances WHERE id = %s", (instance_id,))
+    if not instance:
+        raise LookupError("流程不存在")
+    if str(instance.get("status") or "") != STATUS_COMPLETED:
+        raise ValueError("审批尚未完成，暂不能恢复 Agent")
+    app_row = query_one("SELECT * FROM project_applications WHERE workflow_instance_id = %s", (instance_id,))
+    if not app_row:
+        raise LookupError("未找到关联的项目申请")
+    app = _public_application(app_row)
+    if int(app["initiator_id"]) != user_id:
+        raise PermissionError("仅申请人可恢复 Agent")
+    status = str(app.get("approval_status") or "")
+    if status != "执行中":
+        raise ValueError(f"当前状态「{status}」不可恢复")
+    execution_context = app.get("execution_context")
+    if not isinstance(execution_context, dict):
+        execution_context = None
+    if not is_execution_running(instance_id) and not has_resumable_checkpoint(instance_id, execution_context):
+        raise ValueError("未找到可恢复的 Agent 会话")
+    return instance, app_row, app
+
+
 async def submit_execution_reply(instance_id: int, user_id: int, message: str) -> None:
     app = get_application_by_instance(instance_id)
     if not app:
@@ -336,7 +422,11 @@ async def submit_execution_reply(instance_id: int, user_id: int, message: str) -
         raise PermissionError("仅申请人可回复")
     queue = _execution_input_queues.get(instance_id)
     if not queue:
-        raise ValueError("当前没有等待回复的执行会话")
+        session = _execution_sessions.get(instance_id)
+        if session and session.input_queue is not None:
+            queue = session.input_queue
+    if not queue:
+        raise ValueError("当前没有等待回复的执行会话，请先连接执行流")
     text = str(message or "").strip()
     if not text:
         raise ValueError("回复内容不能为空")
@@ -381,20 +471,95 @@ def _finalize_execution_error(app_id: int, err: str) -> None:
     )
 
 
-async def stream_application_execution(instance_id: int, user_id: int) -> AsyncIterator[dict[str, Any]]:
-    _, app_row, app = _validate_execute_request(instance_id, user_id)
+async def _broadcast_event(instance_id: int, kind: str, payload_item: Any) -> None:
+    session = _execution_sessions.get(instance_id)
+    if not session:
+        return
+    for queue in list(session.event_queues):
+        await queue.put((kind, payload_item))
 
-    app_id = int(app_row["id"])
-    payload = _load_payload(app_row)
-    _mark_execution_started(app_id)
+
+async def _attach_execution_stream(
+    instance_id: int,
+    *,
+    app_id: int,
+    app: dict[str, Any],
+    payload: dict[str, Any],
+    resume: bool,
+) -> AsyncIterator[dict[str, Any]]:
+    existing = _execution_sessions.get(instance_id)
+    if existing and not existing.task.done():
+        subscriber: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+        existing.event_queues.append(subscriber)
+        input_queue = existing.input_queue or asyncio.Queue()
+        existing.input_queue = input_queue
+        _execution_input_queues[instance_id] = input_queue
+        agent_meta = get_agent_meta()
+        execution_context = app.get("execution_context") if isinstance(app.get("execution_context"), dict) else None
+        yield {
+            "type": "meta",
+            "resumed": True,
+            "agent_meta": agent_meta,
+            "execution_context": execution_context,
+            "text": "已重新连接到进行中的 Agent 执行...\n",
+        }
+        try:
+            while True:
+                try:
+                    kind, payload_item = await asyncio.wait_for(subscriber.get(), timeout=20.0)
+                except asyncio.TimeoutError:
+                    if existing.task.done():
+                        break
+                    yield {"type": "ping"}
+                    continue
+                if kind == "log":
+                    yield {"type": "log", "text": payload_item}
+                elif kind == "input_required":
+                    yield {"type": "input_required", "prompt": str(payload_item or "")}
+                elif kind == "done":
+                    result = payload_item
+                    yield {
+                        "type": "done",
+                        "summary": str(result.get("summary") or "Agent 执行完成"),
+                        "project_key": result.get("project_key") or app["project_key"],
+                        "project_url": str(result.get("project_url") or ""),
+                        "flow_status": "已完成",
+                        "agent_meta": agent_meta,
+                        "execution_context": result.get("execution_context") or execution_context,
+                    }
+                    break
+                elif kind == "error":
+                    err = str(payload_item)
+                    yield {"type": "log", "text": f"\n❌ 执行失败：{err}\n"}
+                    yield {"type": "error", "message": err, "flow_status": "失败"}
+                    break
+        finally:
+            if subscriber in existing.event_queues:
+                existing.event_queues.remove(subscriber)
+            if not existing.event_queues:
+                _execution_input_queues.pop(instance_id, None)
+        return
 
     plan = build_application_plan(payload)
     execution_context = public_execution_context(resolve_execution_resources(payload, plan))
-
     agent_meta = get_agent_meta()
     execution_context["agent"] = agent_meta
-    footer = format_execution_footer(agent_meta, execution_context)
-    _append_execution_log(app_id, f"{footer}\n")
+    thread_id = execution_thread_id(instance_id, execution_context)
+    execution_context["checkpoint_thread_id"] = thread_id
+
+    if resume:
+        saved_context = app.get("execution_context")
+        if isinstance(saved_context, dict):
+            execution_context = {**saved_context, **execution_context}
+            execution_context["agent"] = agent_meta
+            execution_context["checkpoint_thread_id"] = execution_thread_id(instance_id, saved_context)
+            thread_id = execution_context["checkpoint_thread_id"]
+        footer = format_execution_footer(agent_meta, execution_context)
+        _append_execution_log(app_id, f"\n{footer}\n♻️ 恢复 Agent 执行（checkpoint: {resolve_checkpoints_path()}/{thread_id}）\n")
+    else:
+        _mark_execution_started(app_id, thread_id=thread_id)
+        footer = format_execution_footer(agent_meta, execution_context)
+        _append_execution_log(app_id, f"{footer}\n")
 
     execute(
         """
@@ -411,14 +576,22 @@ async def stream_application_execution(instance_id: int, user_id: int) -> AsyncI
         text = line if line.endswith("\n") else f"{line}\n"
         _append_execution_log(app_id, text)
         await event_queue.put(("log", text))
+        await _broadcast_event(instance_id, "log", text)
 
     async def input_fn(prompt: str) -> str:
         await event_queue.put(("input_required", prompt))
+        await _broadcast_event(instance_id, "input_required", prompt)
         return await input_queue.get()
 
     async def runner() -> None:
         try:
-            result = await run_project_create_agent(payload, log_fn=log_fn, input_fn=input_fn)
+            result = await run_project_create_agent(
+                payload,
+                log_fn=log_fn,
+                input_fn=input_fn,
+                thread_id=thread_id,
+                resume=resume,
+            )
             project_url = str(
                 result.get("project_url") or build_project_url(result.get("project_key") or app["project_key"])
             )
@@ -432,28 +605,43 @@ async def stream_application_execution(instance_id: int, user_id: int) -> AsyncI
                 project_url=project_url,
                 execution_context=result_context,
             )
-            await event_queue.put(("done", {**result, "project_url": project_url, "summary": summary, "execution_context": result_context}))
+            payload_done = {
+                **result,
+                "project_url": project_url,
+                "summary": summary,
+                "execution_context": result_context,
+            }
+            await event_queue.put(("done", payload_done))
+            await _broadcast_event(instance_id, "done", payload_done)
         except Exception as exc:
             err = str(exc).strip() or repr(exc)
             _finalize_execution_error(app_id, err)
             await event_queue.put(("error", err))
+            await _broadcast_event(instance_id, "error", err)
         finally:
             _execution_input_queues.pop(instance_id, None)
+            _execution_sessions.pop(instance_id, None)
 
     task = asyncio.create_task(runner())
+    _execution_sessions[instance_id] = _ExecutionSession(task=task, event_queues=[event_queue], input_queue=input_queue)
+
     yield {
         "type": "meta",
+        "resumed": resume,
         "agent_meta": agent_meta,
         "execution_context": execution_context,
-        "text": footer,
+        "text": footer if not resume else f"{footer}\n♻️ 恢复 Agent 执行...\n",
     }
-    yield {"type": "log", "text": f"正在启动 Agent 执行...\n"}
+    if not resume:
+        yield {"type": "log", "text": "正在启动 Agent 执行...\n"}
 
     try:
         while True:
             try:
                 kind, payload_item = await asyncio.wait_for(event_queue.get(), timeout=20.0)
             except asyncio.TimeoutError:
+                if task.done():
+                    break
                 yield {"type": "ping"}
                 continue
             if kind == "log":
@@ -483,11 +671,32 @@ async def stream_application_execution(instance_id: int, user_id: int) -> AsyncI
                 yield {"type": "error", "message": err, "flow_status": "失败"}
                 break
     finally:
-        _execution_input_queues.pop(instance_id, None)
+        session = _execution_sessions.get(instance_id)
+        if session and event_queue in session.event_queues:
+            session.event_queues.remove(event_queue)
+        if session and not session.event_queues:
+            _execution_input_queues.pop(instance_id, None)
         if not task.done():
-            # 客户端断开 SSE 时仍让 runner 在后台跑完并落库。
             return
         await task
+
+
+async def stream_application_execution(instance_id: int, user_id: int, *, resume: bool = False) -> AsyncIterator[dict[str, Any]]:
+    if resume:
+        _, app_row, app = _validate_resume_request(instance_id, user_id)
+    else:
+        _, app_row, app = _validate_execute_request(instance_id, user_id)
+
+    app_id = int(app_row["id"])
+    payload = _load_payload(app_row)
+    async for event in _attach_execution_stream(
+        instance_id,
+        app_id=app_id,
+        app=app,
+        payload=payload,
+        resume=resume,
+    ):
+        yield event
 
 
 def sync_application_status(instance_id: int, workflow_status: str) -> None:

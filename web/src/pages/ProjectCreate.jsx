@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ScrollSelect from "../components/ScrollSelect.jsx";
 import SearchableSelect from "../components/SearchableSelect.jsx";
+import SubmitToast from "../components/SubmitToast.jsx";
 import ValuesFilePicker from "../components/ValuesFilePicker.jsx";
 import {
   fetchApplicant,
@@ -419,6 +420,7 @@ export default function ProjectCreate() {
           ? `项目申请 ${item.serial_no} 已提交，等待审批`
           : `项目 ${item.project_key || payload.project_key} 申请已提交`,
       );
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -428,6 +430,7 @@ export default function ProjectCreate() {
 
   return (
     <section>
+      <SubmitToast message={success} onClose={() => setSuccess("")} />
       <h1 className="page-title">创建项目</h1>
       <p className="page-desc">填写项目信息后提交申请，系统将交给 Agent 使用 Skill 创建 Helm Chart 项目并配置构建。</p>
       {zadig ? (
@@ -462,11 +465,6 @@ export default function ProjectCreate() {
       {error ? (
         <div className="banner error" role="alert">
           {error}
-        </div>
-      ) : null}
-      {success ? (
-        <div className="banner success" role="status">
-          {success}
         </div>
       ) : null}
       <form className="form-stack" onSubmit={onSubmit}>

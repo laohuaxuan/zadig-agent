@@ -16,15 +16,19 @@ container:
     httpGet:
       path: /api/health
       port: 8088
-    initialDelaySeconds: 20
+    initialDelaySeconds: 60
     periodSeconds: 20
+    timeoutSeconds: 3
+    failureThreshold: 5
   readinessProbe:
     enabled: true
     httpGet:
       path: /api/health
       port: 8088
-    initialDelaySeconds: 8
+    initialDelaySeconds: 10
     periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 12
   volumeMounts:
     - mountPath: /app/checkpoints
       name: zadig-agent-pvc

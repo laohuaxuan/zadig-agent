@@ -75,7 +75,9 @@ mysql -h <host> -u <user> -p zadig_agent < deploy/sql/clear_workflow_data.sql
 
 - 程序通过环境变量 `CONFIG_FILE` 读取配置（默认 `/app/config.yaml`）。
 - `mysql.password` 为空时，从环境变量 `DB_PASSWORD` 读取。
+- **Pod 重启 / 探针失败**：Uvicorn 会在 `lifespan` 完成前不监听 8088。若日志停在 `Waiting for application startup`，通常是 MySQL 连接/初始化阻塞或失败。请检查 `DB_PASSWORD`、MySQL 地址可达性；部署后日志应出现 `应用启动：开始监听 HTTP 请求`。readiness/liveness 已放宽初始等待时间。
 - Agent、Zadig 实例、技能与模板等业务数据保存在 MySQL，不在镜像内。
+- **Agent 会话 checkpoint**：Web 平台与 CLI 一样，将 LangGraph 对话状态写入 `/app/checkpoints/<instance_id>/`（PVC 挂载，见 `deploy/values/dev.yaml`）。Pod 重启后，状态为「执行中」且 checkpoint 存在的申请可点「恢复连接」继续，无需从头执行。可通过环境变量 `CHECKPOINTS_DIR` 覆盖目录。
 - 首次启动会根据 `auth.root_initial_*` 自动创建超级管理员（若库中尚无 root 本地账号）。
 - 若集群 Ingress/网关会校验 `Authorization: Bearer`，前端已通过 `X-Access-Token` 传递登录态（与 `mse-domain-binding` 一致）；不要改回仅使用 Bearer。
 - 生产环境请将 ConfigMap 中 `feishu.app_base_url` 设为实际访问域名（如 `https://zadig-agent.openxlab.org.cn`），并填写飞书 `app_id` / `app_secret`。

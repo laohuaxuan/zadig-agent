@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from contextlib import contextmanager
 from datetime import datetime
@@ -14,8 +15,11 @@ from yaml import safe_dump
 
 from utils.config import config_path, invalidate_config_cache, load_config, mysql_config
 
+logger = logging.getLogger(__name__)
+
 _DB_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _initialized = False
+_catalog_synced = False
 _KEEP_KEYS = ("server", "mysql", "mcp", "integration")
 
 
@@ -34,6 +38,9 @@ def _connect(*, database: str | None) -> pymysql.connections.Connection:
         charset=cfg["charset"],
         cursorclass=DictCursor,
         autocommit=False,
+        connect_timeout=10,
+        read_timeout=30,
+        write_timeout=30,
     )
 
 
@@ -78,10 +85,11 @@ def executemany(sql: str, rows: list[tuple[Any, ...]]) -> None:
             cur.executemany(sql, rows)
 
 
-def ensure_db() -> None:
+def _ensure_db_core() -> None:
     global _initialized
     if _initialized:
         return
+    logger.info("正在连接 MySQL 并初始化 schema…")
     _create_database()
     _create_tables()
     _migrate_yaml_if_needed()
@@ -93,12 +101,28 @@ def ensure_db() -> None:
     _migrate_integration_remarks()
     _migrate_integration_sync_cache()
     _initialized = True
+    logger.info("MySQL schema 初始化完成")
+
+
+def sync_catalog_to_db() -> None:
+    global _catalog_synced
+    if _catalog_synced:
+        return
+    _ensure_db_core()
+    logger.info("正在同步内置 Skills / Templates / MCP 到数据库…")
     from webapi.catalog import sync_file_skills_to_db, sync_mcp_to_db
     from webapi.templates_catalog import sync_file_templates_to_db
 
     sync_file_skills_to_db()
     sync_file_templates_to_db()
     sync_mcp_to_db()
+    _catalog_synced = True
+    logger.info("内置资源同步完成")
+
+
+def ensure_db() -> None:
+    """首次访问 DB 时确保 schema 就绪（不阻塞于 catalog 同步）。"""
+    _ensure_db_core()
 
 
 def _create_database() -> None:

@@ -611,6 +611,47 @@ a.config-btn {
   outline-offset: 2px;
 }
 
+@keyframes submit-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.submit-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 14px 20px;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: center;
+  animation: submit-toast-in 0.22s ease;
+  pointer-events: none;
+}
+
+.submit-toast-success {
+  background: #edf9ee;
+  color: #1a7f37;
+  border: 1px solid #86efac;
+}
+
+.submit-toast-error {
+  background: #fff2f0;
+  color: var(--danger);
+  border: 1px solid #fecaca;
+}
+
 .banner {
   margin-bottom: 12px;
   padding: 10px 12px;

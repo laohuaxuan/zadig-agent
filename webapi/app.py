@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -13,6 +14,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from webapi.platform_permissions import (
     apply_skill_acl,
@@ -102,7 +105,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.append(str(_ROOT))
 
-from utils.db import ensure_db
+from utils.db import _ensure_db_core
 from utils.zadig import zadig_request
 
 _SECRET_KEYS = {
@@ -118,16 +121,37 @@ _SECRET_KEYS = {
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    ensure_db()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logger.info("应用启动：初始化数据库 schema…")
+    try:
+        await asyncio.to_thread(_ensure_db_core)
+    except Exception:
+        logger.exception("数据库初始化失败，进程退出")
+        raise
+    logger.info("应用启动：开始监听 HTTP 请求")
     sync_task = asyncio.create_task(integration_sync_loop())
+    catalog_task = asyncio.create_task(_startup_catalog_sync())
     try:
         yield
     finally:
+        catalog_task.cancel()
         sync_task.cancel()
-        try:
-            await sync_task
-        except asyncio.CancelledError:
-            pass
+        for task in (catalog_task, sync_task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
+async def _startup_catalog_sync() -> None:
+    try:
+        from utils.db import sync_catalog_to_db
+
+        await asyncio.to_thread(sync_catalog_to_db)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("后台 catalog 同步失败")
 
 
 app = FastAPI(title="Zadig Agent Settings", lifespan=lifespan)
@@ -419,7 +443,17 @@ def _fetch(path: str, params: dict[str, Any] | None = None) -> Any:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "name": "zadig-agent-settings"}
+    try:
+        from utils.db import query_one
+
+        query_one("SELECT 1 AS ok")
+        return {"ok": True, "name": "zadig-agent-settings", "db": "up"}
+    except Exception as exc:
+        logger.warning("health check failed: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "name": "zadig-agent-settings", "db": "down", "detail": str(exc)},
+        )
 
 
 @app.get("/api/code-sources")

@@ -286,6 +286,7 @@ export default function WorkflowPanel() {
   const logRef = useRef(null);
   const detailCacheRef = useRef(new Map());
   const detailRequestRef = useRef(0);
+  const autoResumeAttemptRef = useRef(null);
   const [error, setError] = useState("");
   const [detailRefreshing, setDetailRefreshing] = useState(false);
 
@@ -473,6 +474,24 @@ export default function WorkflowPanel() {
   ]);
 
   useEffect(() => {
+    autoResumeAttemptRef.current = null;
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || executing || detailLoading) return;
+    if (!detail?.can_resume || detail?.application?.flow_status !== "执行中") return;
+    if (autoResumeAttemptRef.current === selectedId) return;
+    autoResumeAttemptRef.current = selectedId;
+    runExecute({ resume: true });
+  }, [
+    selectedId,
+    executing,
+    detailLoading,
+    detail?.can_resume,
+    detail?.application?.flow_status,
+  ]);
+
+  useEffect(() => {
     if (logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
@@ -508,52 +527,59 @@ export default function WorkflowPanel() {
     }
   }
 
-  async function runExecute() {
+  async function runExecute(options = {}) {
+    const resume = Boolean(options.resume);
     if (!selectedId || executing) return;
     setExecuting(true);
     setExecutionPhase("running");
     setError("");
-    setExecutionLog("");
-    setUserReply("");
-    setAgentMeta(null);
-    setExecutionContext(null);
+    if (!resume) {
+      setExecutionLog("");
+      setUserReply("");
+      setAgentMeta(null);
+      setExecutionContext(null);
+    }
     try {
-      await streamWorkflowExecution(selectedId, {
-        onMeta: (event) => {
-          if (event?.agent_meta) setAgentMeta(event.agent_meta);
-          if (event?.execution_context) setExecutionContext(event.execution_context);
-          if (event?.text) {
-            setExecutionLog((prev) => (prev.includes(event.text) ? prev : `${prev}${event.text}\n`));
-          }
+      await streamWorkflowExecution(
+        selectedId,
+        {
+          resume,
+          onMeta: (event) => {
+            if (event?.agent_meta) setAgentMeta(event.agent_meta);
+            if (event?.execution_context) setExecutionContext(event.execution_context);
+            if (event?.text) {
+              setExecutionLog((prev) => (prev.includes(event.text) ? prev : `${prev}${event.text}\n`));
+            }
+          },
+          onLog: (text) => setExecutionLog((prev) => prev + text),
+          onInputRequired: (prompt) => {
+            setExecutionPhase("awaiting_input");
+            if (prompt) {
+              setExecutionLog((prev) => `${prev}\n⏸ 等待您的确认，请在下方输入回复。\n`);
+            }
+          },
+          onDone: async (event) => {
+            setExecutionPhase("finished");
+            if (event.agent_meta) setAgentMeta(event.agent_meta);
+            if (event.execution_context) setExecutionContext(event.execution_context);
+            if (event.project_url) {
+              setExecutionLog((prev) => `${prev}\n项目链接：${event.project_url}\n`);
+            }
+            detailCacheRef.current.delete(selectedId);
+            await refreshAll(selectedId);
+          },
+          onError: async (event) => {
+            setExecutionPhase("finished");
+            const message = event.message || "Agent 执行失败";
+            setError(message);
+            setExecutionLog((prev) =>
+              prev.includes("❌ 执行失败") ? prev : `${prev}\n❌ 执行失败：${message}\n`,
+            );
+            detailCacheRef.current.delete(selectedId);
+            await refreshAll(selectedId);
+          },
         },
-        onLog: (text) => setExecutionLog((prev) => prev + text),
-        onInputRequired: (prompt) => {
-          setExecutionPhase("awaiting_input");
-          if (prompt) {
-            setExecutionLog((prev) => `${prev}\n⏸ 等待您的确认，请在下方输入回复。\n`);
-          }
-        },
-        onDone: async (event) => {
-          setExecutionPhase("finished");
-          if (event.agent_meta) setAgentMeta(event.agent_meta);
-          if (event.execution_context) setExecutionContext(event.execution_context);
-          if (event.project_url) {
-            setExecutionLog((prev) => `${prev}\n项目链接：${event.project_url}\n`);
-          }
-          detailCacheRef.current.delete(selectedId);
-          await refreshAll(selectedId);
-        },
-        onError: async (event) => {
-          setExecutionPhase("finished");
-          const message = event.message || "Agent 执行失败";
-          setError(message);
-          setExecutionLog((prev) =>
-            prev.includes("❌ 执行失败") ? prev : `${prev}\n❌ 执行失败：${message}\n`,
-          );
-          detailCacheRef.current.delete(selectedId);
-          await refreshAll(selectedId);
-        },
-      });
+      );
     } catch (err) {
       setExecutionPhase("finished");
       setError(err.message);
@@ -588,6 +614,7 @@ export default function WorkflowPanel() {
       (workflowCompleted || executing || application.execution_log || application.flow_status === "执行中"),
   );
   const serverExecuting = application?.flow_status === "执行中";
+  const canResume = Boolean(detail?.can_resume && !executing);
   const canExecute = Boolean(detail?.can_execute && !executing && !serverExecuting);
   const isRunning = executing || serverExecuting;
   const serverAwaitingInput = Boolean(detail?.execution_session?.awaiting_input);
@@ -803,8 +830,13 @@ export default function WorkflowPanel() {
                     <div className="workflow-agent-head">
                       <h4 className="workflow-detail-subtitle">Agent 执行</h4>
                       {canExecute ? (
-                        <button type="button" className="primary-btn" disabled={executing} onClick={runExecute}>
+                        <button type="button" className="primary-btn" disabled={executing} onClick={() => runExecute()}>
                           {application?.flow_status === "失败" ? "重新执行" : "开始执行"}
+                        </button>
+                      ) : null}
+                      {canResume ? (
+                        <button type="button" className="primary-btn" disabled={executing} onClick={() => runExecute({ resume: true })}>
+                          恢复连接
                         </button>
                       ) : null}
                       {isRunning ? <span className="wf-muted">执行中...</span> : null}
@@ -858,7 +890,7 @@ export default function WorkflowPanel() {
                             : logAwaiting && application?.flow_status === "已完成"
                               ? "执行已结束，如需继续请重新执行 Agent"
                               : logAwaiting && application?.flow_status === "执行中"
-                                ? "执行连接已断开，请重新点击「开始执行」"
+                                ? "执行连接已断开，请点击「恢复连接」或等待自动重连"
                                 : executionPhase === "finished"
                                   ? "流程已结束，无法继续回复"
                                   : executing
