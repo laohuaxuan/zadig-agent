@@ -19,7 +19,12 @@ from webapi.agent_runner import (
 )
 from webapi.agent_resources import public_execution_context, resolve_execution_resources
 from webapi.platform_users import get_user_by_id, new_record_id
-from webapi.platform_roles import WORKFLOW_TYPE_ADD_SERVICE, WORKFLOW_TYPE_ADD_WORKFLOW, WORKFLOW_TYPE_HELM_PROJECT
+from webapi.platform_roles import (
+    WORKFLOW_TYPE_ADD_ENVIRONMENT,
+    WORKFLOW_TYPE_ADD_SERVICE,
+    WORKFLOW_TYPE_ADD_WORKFLOW,
+    WORKFLOW_TYPE_HELM_PROJECT,
+)
 from webapi.workflows import STATUS_COMPLETED, STATUS_REJECTED, STATUS_REVOKED, bump_initiator_notify, create_helm_project_workflow
 from webapi.workflow_notify import schedule_submit_notifications
 from webapi.zadig_meta import build_application_plan
@@ -111,6 +116,17 @@ def _assert_no_duplicate_application(payload: dict[str, Any]) -> None:
             status = str(row.get("approval_status") or "")
             raise ValueError(
                 f"已存在相同添加工作流申请（{project_key} / {workflow_name}），"
+                f"当前状态：{status}，请勿重复提交"
+            )
+        if app_type == "add_environment":
+            if str(item.get("environment") or "").strip() != environment:
+                continue
+            if bool(item.get("environment_production")) != bool(payload.get("environment_production")):
+                continue
+            status = str(row.get("approval_status") or "")
+            env_type = "生产环境" if payload.get("environment_production") else "测试环境"
+            raise ValueError(
+                f"已存在相同添加环境申请（{project_key} / {environment} / {env_type}），"
                 f"当前状态：{status}，请勿重复提交"
             )
         if app_type == "create_project":
@@ -227,6 +243,19 @@ def _build_form_data(payload: dict[str, Any]) -> list[dict[str, str]]:
             {"label": "部署环境类型", "value": deploy_type},
             {"label": "部署环境", "value": str(payload.get("deploy_env_name") or "")},
         ]
+    if app_type == "add_environment":
+        return [
+            {"label": "项目名称", "value": str(payload.get("project_name") or payload.get("project_key") or "")},
+            {"label": "项目标识", "value": str(payload.get("project_key") or "")},
+            {
+                "label": "环境类型",
+                "value": "生产环境" if payload.get("environment_production") else "测试环境",
+            },
+            {"label": "环境名称", "value": str(payload.get("environment") or "")},
+            {"label": "集群", "value": str(payload.get("cluster_name") or "")},
+            {"label": "命名空间", "value": str(payload.get("namespace") or "")},
+            {"label": "镜像仓库", "value": str(payload.get("registry_label") or payload.get("registry_id") or "")},
+        ]
     return [
         {"label": "项目名称", "value": str(payload.get("project_name") or "")},
         {"label": "项目标识", "value": str(payload.get("project_key") or "")},
@@ -258,6 +287,8 @@ async def submit_application(payload: dict[str, Any], initiator_id: int) -> dict
     summary = (
         f"{project_name} / {payload.get('workflow_name') or ''}"
         if app_type == "add_workflow"
+        else f"{project_name} / {payload.get('environment') or ''}"
+        if app_type == "add_environment"
         else f"{project_name} / {payload.get('service_name') or ''} / {payload.get('environment') or ''}"
     )
     form_data = _build_form_data({**payload, "application_type": app_type})
@@ -267,6 +298,9 @@ async def submit_application(payload: dict[str, Any], initiator_id: int) -> dict
     elif app_type == "add_service":
         workflow_type = WORKFLOW_TYPE_ADD_SERVICE
         title = f"Helm 添加服务：{project_name} / {payload.get('service_name') or ''}"
+    elif app_type == "add_environment":
+        workflow_type = WORKFLOW_TYPE_ADD_ENVIRONMENT
+        title = f"Helm 添加环境：{project_name} / {payload.get('environment') or ''}"
     else:
         workflow_type = WORKFLOW_TYPE_HELM_PROJECT
         title = f"Helm 项目申请：{project_name}"

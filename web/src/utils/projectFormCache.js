@@ -138,3 +138,21 @@ export function loadWorkflowAddOptions() {
     };
   });
 }
+
+export function loadEnvironmentAddOptions() {
+  return cached("environment-add-options", async () => {
+    const results = await Promise.allSettled([
+      fetchProjects({ pageNum: 1, pageSize: 200 }),
+      fetchClusters({ pageNum: 1, pageSize: 100 }),
+      fetchRegistries({ pageNum: 1, pageSize: 200 }),
+      fetchZadig(),
+    ]);
+    return {
+      projects: settledItems(results[0]),
+      clusters: settledItems(results[1]),
+      registries: settledItems(results[2]),
+      zadig: settledItem(results[3]),
+      projectsError: results[0].status === "rejected" ? results[0].reason : null,
+    };
+  });
+}

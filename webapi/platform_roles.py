@@ -15,6 +15,7 @@ ROLE_LABELS = {
 WORKFLOW_TYPE_HELM_PROJECT = "Helm项目申请"
 WORKFLOW_TYPE_ADD_SERVICE = "Helm添加服务申请"
 WORKFLOW_TYPE_ADD_WORKFLOW = "Helm添加工作流申请"
+WORKFLOW_TYPE_ADD_ENVIRONMENT = "Helm添加环境申请"
 
 
 def role_label(role: str) -> str:

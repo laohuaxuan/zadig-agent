@@ -201,6 +201,28 @@ export function fetchProjectBuildServices(projectKey) {
   return request(`/api/projects/${encodeURIComponent(projectKey)}/build-services`);
 }
 
+export function checkProjectEnvironment(projectKey, name, { production = false } = {}) {
+  const url = new URL(
+    `/api/projects/${encodeURIComponent(projectKey)}/environments/check`,
+    window.location.origin,
+  );
+  url.searchParams.set("name", name);
+  url.searchParams.set("production", production ? "true" : "false");
+  return request(`${url.pathname}${url.search}`);
+}
+
+export function submitEnvironmentApplication(payload) {
+  return submitApplication({ ...payload, application_type: "add_environment" });
+}
+
+export function previewEnvironmentApplication(payload) {
+  return request("/api/environments/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, application_type: "add_environment" }),
+  });
+}
+
 export function submitWorkflowApplication(payload) {
   return submitApplication({ ...payload, application_type: "add_workflow" });
 }

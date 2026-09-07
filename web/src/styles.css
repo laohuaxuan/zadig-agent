@@ -978,6 +978,52 @@ th {
   font-size: 12px;
 }
 
+.field-hint.error-text {
+  color: #d93026;
+  font-weight: 500;
+}
+
+.field-has-error input,
+.field-has-error select,
+.field-has-error textarea,
+input.field-input-error,
+select.field-input-error,
+textarea.field-input-error {
+  border-color: #d93026;
+  background: #fffafb;
+  box-shadow: 0 0 0 2px rgba(217, 48, 38, 0.14);
+}
+
+.field-has-error input:focus,
+.field-has-error select:focus,
+.field-has-error textarea:focus,
+input.field-input-error:focus,
+select.field-input-error:focus,
+textarea.field-input-error:focus {
+  border-color: #d93026;
+  box-shadow: 0 0 0 2px rgba(217, 48, 38, 0.22);
+}
+
+.field-conflict-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+.field-conflict-alert::before {
+  content: "⚠";
+  flex-shrink: 0;
+  font-weight: 700;
+}
+
 .field-label {
   display: inline-flex;
   align-items: center;

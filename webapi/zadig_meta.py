@@ -498,6 +498,14 @@ def list_project_environments(project_key: str, *, production: bool = False) -> 
     return items
 
 
+def environment_exists_in_project(project_key: str, env_name: str, *, production: bool = False) -> bool:
+    key = str(project_key or "").strip()
+    env = str(env_name or "").strip()
+    if not key or not env:
+        return False
+    return any(item["env_name"] == env for item in list_project_environments(key, production=production))
+
+
 def get_project_environment(project_key: str, env_name: str, *, production: bool = False) -> dict[str, str]:
     key = str(project_key or "").strip()
     env = str(env_name or "").strip()
@@ -1290,12 +1298,122 @@ def build_add_workflow_plan(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _validate_add_environment_input(payload: dict[str, Any]) -> dict[str, Any]:
+    project_key = str(payload.get("project_key") or "").strip()
+    project_name = str(payload.get("project_name") or project_key).strip()
+    environment = str(payload.get("environment") or "").strip()
+    environment_production = bool(payload.get("environment_production", False))
+    cluster_name = str(payload.get("cluster_name") or "").strip()
+    namespace = str(payload.get("namespace") or "").strip()
+    registry_id = str(payload.get("registry_id") or "").strip()
+    registry_label = str(payload.get("registry_label") or registry_id).strip()
+
+    if not project_key:
+        raise ValueError("请选择项目")
+    if not environment:
+        raise ValueError("请填写环境名称")
+    if not _ENV_KEY_RE.match(environment):
+        raise ValueError("环境名称需以字母开头，只能包含字母、数字、下划线和中划线")
+    if environment_exists_in_project(project_key, environment, production=environment_production):
+        env_type = "生产环境" if environment_production else "测试环境"
+        raise ValueError(f"项目 {project_key} 的{env_type}中已存在环境 {environment}")
+    if not cluster_name:
+        raise ValueError("请选择 K8s 集群")
+    if not namespace:
+        raise ValueError("请填写或选择 K8s 命名空间")
+    if not registry_id:
+        raise ValueError("请选择镜像仓库")
+
+    return {
+        "application_type": "add_environment",
+        "project_name": project_name,
+        "project_key": project_key,
+        "environment": environment,
+        "environment_production": environment_production,
+        "cluster_name": cluster_name,
+        "namespace": namespace,
+        "registry_id": registry_id,
+        "registry_label": registry_label,
+    }
+
+
+def build_add_environment_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    data = _validate_add_environment_input(payload)
+    production = bool(data.get("environment_production", False))
+    env_name = data["environment"]
+    existing_envs = list_project_environments(data["project_key"], production=production)
+    env_exists = any(item["env_name"] == env_name for item in existing_envs)
+    helm_environment: dict[str, Any] = {
+        "project_key": data["project_key"],
+        "env_name": env_name,
+        "cluster_id": _cluster_id(data["cluster_name"]),
+        "namespace": data["namespace"],
+        "registry_id": data["registry_id"],
+        "production": production,
+    }
+    env_type_label = "生产环境" if production else "测试环境"
+    preview = {
+        "project_key": data["project_key"],
+        "application_type": "add_environment",
+        "sections": [
+            {
+                "title": "基本信息",
+                "items": [
+                    {"label": "项目名称", "value": data["project_name"]},
+                    {"label": "项目标识", "value": data["project_key"]},
+                    {"label": "环境类型", "value": env_type_label},
+                    {"label": "环境名称", "value": env_name},
+                    {"label": "环境状态", "value": "已存在，无需新建" if env_exists else "不存在，Agent 将新建"},
+                ],
+            },
+            {
+                "title": "K8s 集群",
+                "items": [
+                    {"label": "集群", "value": data["cluster_name"]},
+                    {"label": "命名空间", "value": data["namespace"]},
+                    {"label": "镜像仓库", "value": data["registry_label"]},
+                ],
+            },
+        ],
+        "skill_name": "add_helm_environment",
+    }
+    agent: dict[str, Any] = {
+        "env_exists": env_exists,
+        "helm_environment": helm_environment,
+    }
+    result: dict[str, Any] = {
+        "project_key": data["project_key"],
+        "preview": preview,
+        "agent": agent,
+    }
+    try:
+        from webapi.agent_resources import public_execution_context, resolve_execution_resources
+
+        ctx = public_execution_context(resolve_execution_resources(payload, result))
+        preview["skill_name"] = ctx["skill"]["name"]
+        preview["sections"].append(
+            {
+                "title": "执行资源",
+                "items": [
+                    {"label": "Skill", "value": ctx["skill"]["display_name"] or ctx["skill"]["name"]},
+                    {"label": "MCP", "value": ctx["mcp"]["server"]},
+                ],
+            }
+        )
+        result["execution_resources"] = ctx
+    except Exception:
+        pass
+    return result
+
+
 def build_application_plan(payload: dict[str, Any]) -> dict[str, Any]:
     app_type = str(payload.get("application_type") or "create_project").strip()
     if app_type == "add_service":
         return build_add_service_plan(payload)
     if app_type == "add_workflow":
         return build_add_workflow_plan(payload)
+    if app_type == "add_environment":
+        return build_add_environment_plan(payload)
     return build_project_plan(payload)
 
 

@@ -55,7 +55,8 @@ const SIDEBAR = [
     items: [
       { to: "/projects/new", label: "创建项目", icon: IconPlus },
       { to: "/projects/add-service", label: "添加新服务", icon: IconPlus },
-      { to: "/projects/add-workflow", label: "添加工作流", icon: IconPlus, end: true },
+      { to: "/projects/add-workflow", label: "添加工作流", icon: IconPlus },
+      { to: "/projects/add-environment", label: "添加新环境", icon: IconPlus, end: true },
       { to: "/workflows", label: "审批流", icon: IconBell, end: true },
     ],
   },
@@ -119,6 +120,7 @@ const CRUMBS = {
   "/projects/new": ["项目管理", "创建项目"],
   "/projects/add-service": ["项目管理", "添加新服务"],
   "/projects/add-workflow": ["项目管理", "添加工作流"],
+  "/projects/add-environment": ["项目管理", "添加新环境"],
   "/skills": ["技能", "Skills", "技能列表"],
   "/skills/new": ["技能", "Skills", "新建"],
   "/mcp": ["技能", "MCP", "技能列表"],

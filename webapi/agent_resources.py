@@ -10,6 +10,7 @@ from webapi.templates_catalog import get_template, list_templates
 _DEFAULT_HELM_SKILL = "create_helm_project"
 _DEFAULT_ADD_SERVICE_SKILL = "add_helm_service"
 _DEFAULT_ADD_WORKFLOW_SKILL = "add_helm_workflow"
+_DEFAULT_ADD_ENVIRONMENT_SKILL = "add_helm_environment"
 _DEFAULT_WORKFLOW_TEMPLATE = "workflow_build_deploy"
 
 
@@ -50,6 +51,10 @@ def _resolve_skill(payload: dict[str, Any], plan: dict[str, Any], skills: list[d
         if _DEFAULT_ADD_WORKFLOW_SKILL in names:
             return next(item for item in skills if item["name"] == _DEFAULT_ADD_WORKFLOW_SKILL)
 
+    if str(payload.get("application_type") or "").strip() == "add_environment":
+        if _DEFAULT_ADD_ENVIRONMENT_SKILL in names:
+            return next(item for item in skills if item["name"] == _DEFAULT_ADD_ENVIRONMENT_SKILL)
+
     if payload.get("project_name") and payload.get("template_name") and not payload.get("application_type"):
         if _DEFAULT_HELM_SKILL in names:
             return next(item for item in skills if item["name"] == _DEFAULT_HELM_SKILL)
@@ -61,6 +66,10 @@ def _resolve_skill(payload: dict[str, Any], plan: dict[str, Any], skills: list[d
     if payload.get("project_key") and payload.get("workflow_name") and str(payload.get("application_type") or "") == "add_workflow":
         if _DEFAULT_ADD_WORKFLOW_SKILL in names:
             return next(item for item in skills if item["name"] == _DEFAULT_ADD_WORKFLOW_SKILL)
+
+    if payload.get("project_key") and payload.get("environment") and str(payload.get("application_type") or "") == "add_environment":
+        if _DEFAULT_ADD_ENVIRONMENT_SKILL in names:
+            return next(item for item in skills if item["name"] == _DEFAULT_ADD_ENVIRONMENT_SKILL)
 
     keywords = " ".join(
         [
@@ -81,6 +90,8 @@ def _resolve_skill(payload: dict[str, Any], plan: dict[str, Any], skills: list[d
         if item["name"] == _DEFAULT_ADD_SERVICE_SKILL and str(payload.get("application_type") or "") == "add_service":
             score += 12
         if item["name"] == _DEFAULT_ADD_WORKFLOW_SKILL and str(payload.get("application_type") or "") == "add_workflow":
+            score += 12
+        if item["name"] == _DEFAULT_ADD_ENVIRONMENT_SKILL and str(payload.get("application_type") or "") == "add_environment":
             score += 12
         if "helm" in keywords and "helm" in text:
             score += 4

@@ -37,6 +37,14 @@ const WORKFLOW_SECTIONS = [
       "用户向已有 Helm 项目添加工作流时，按模板配置的多级审批链依次流转至各级审批人。",
     defaultName: "Helm 添加工作流多级审批",
   },
+  {
+    key: "add_environment",
+    workflowType: "Helm添加环境申请",
+    label: "添加新环境",
+    description:
+      "用户向已有 Helm 项目添加测试或生产环境时，按模板配置的多级审批链依次流转至各级审批人。",
+    defaultName: "Helm 添加环境多级审批",
+  },
 ];
 
 const APPROVAL_MODE_LABEL = {

@@ -7,6 +7,7 @@ import ResourcePage from "./pages/ResourcePage.jsx";
 import ProjectCreate from "./pages/ProjectCreate.jsx";
 import ServiceAdd from "./pages/ServiceAdd.jsx";
 import WorkflowAdd from "./pages/WorkflowAdd.jsx";
+import EnvironmentAdd from "./pages/EnvironmentAdd.jsx";
 import SkillCreate from "./pages/SkillCreate.jsx";
 import SkillDetail from "./pages/SkillDetail.jsx";
 import SkillList from "./pages/SkillList.jsx";
@@ -100,6 +101,7 @@ export default function App() {
           <Route path="/projects/new" element={<ProjectCreate />} />
           <Route path="/projects/add-service" element={<ServiceAdd />} />
           <Route path="/projects/add-workflow" element={<WorkflowAdd />} />
+          <Route path="/projects/add-environment" element={<EnvironmentAdd />} />
           <Route
             path="/agents/new"
             element={

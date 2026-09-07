@@ -146,6 +146,7 @@ _PLAN_TOOL_AGENT_KEYS: dict[str, str] = {
     "create_workflow": "workflow",
     "create_helm_service_from_template": "helm_service",
     "add_helm_services": "helm_env_service",
+    "create_helm_environment": "helm_environment",
 }
 
 
@@ -153,6 +154,8 @@ def _required_tools_for_plan(payload: dict[str, Any], plan: dict[str, Any]) -> l
     app_type = str(payload.get("application_type") or "create_project").strip()
     if app_type == "add_workflow":
         return ["create_workflow"]
+    if app_type == "add_environment":
+        return ["create_helm_environment"]
     if app_type == "add_service":
         return [
             "create_helm_service_from_template",
@@ -346,12 +349,18 @@ async def run_project_create_agent(
     skill_name = execution_context["skill"]["name"]
     is_add_service = str(payload.get("application_type") or "").strip() == "add_service"
     is_add_workflow = str(payload.get("application_type") or "").strip() == "add_workflow"
+    is_add_environment = str(payload.get("application_type") or "").strip() == "add_environment"
 
     await _emit_log(log_fn, f"🤖 助手正在思考和处理...\n{'=' * 60}\n")
     if is_add_workflow:
         await _emit_log(
             log_fn,
             f"开始执行 Helm 添加工作流计划，项目：{project_key}，工作流：{payload.get('workflow_name') or ''}\n",
+        )
+    elif is_add_environment:
+        await _emit_log(
+            log_fn,
+            f"开始执行 Helm 添加环境计划，项目：{project_key}，环境：{payload.get('environment') or ''}\n",
         )
     elif is_add_service:
         await _emit_log(log_fn, f"开始执行 Helm 添加服务计划，项目：{project_key}，服务：{payload.get('service_name') or ''}\n")
@@ -405,6 +414,8 @@ async def run_project_create_agent(
         start_message = (
             "请开始执行添加 Helm 工作流计划。"
             if is_add_workflow
+            else "请开始执行添加 Helm 环境计划。"
+            if is_add_environment
             else "请开始执行添加 Helm 服务计划。"
             if is_add_service
             else "请开始执行创建 Helm Chart 项目计划。"

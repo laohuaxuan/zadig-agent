@@ -79,10 +79,12 @@ from webapi.feishu_routes import router as feishu_router
 from webapi.platform_auth import parse_token
 from webapi.platform_users import get_user_by_id
 from webapi.zadig_meta import (
+    build_add_environment_plan,
     build_add_service_plan,
     build_add_workflow_plan,
     build_application_plan,
     build_project_plan,
+    environment_exists_in_project,
     get_project_environment,
     list_branches,
     list_cluster_namespaces,
@@ -391,6 +393,18 @@ class WorkflowAddBody(BaseModel):
     deploy_env_name: str = Field(min_length=1)
 
 
+class EnvironmentAddBody(BaseModel):
+    application_type: str = "add_environment"
+    project_key: str = Field(min_length=1)
+    project_name: str = ""
+    environment: str = Field(min_length=1)
+    environment_production: bool = False
+    cluster_name: str = Field(min_length=1)
+    namespace: str = Field(min_length=1)
+    registry_id: str = Field(min_length=1)
+    registry_label: str = ""
+
+
 class IntegrationRemarkBody(BaseModel):
     remark: str = ""
 
@@ -618,6 +632,19 @@ def api_list_project_environments(project_key: str, production: bool = False) ->
     return {"ok": True, "items": items, "production": production}
 
 
+@app.get("/api/projects/{project_key}/environments/check")
+def api_check_project_environment(
+    project_key: str,
+    name: str = "",
+    production: bool = False,
+) -> dict[str, Any]:
+    try:
+        exists = environment_exists_in_project(project_key, name, production=production)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"ok": True, "exists": exists, "name": name, "production": production}
+
+
 @app.get("/api/projects/{project_key}/environments/{env_name}")
 def api_get_project_environment(project_key: str, env_name: str, production: bool = False) -> dict[str, Any]:
     try:
@@ -712,6 +739,17 @@ def api_preview_service(body: ServiceAddBody) -> dict[str, Any]:
 def api_preview_workflow(body: WorkflowAddBody) -> dict[str, Any]:
     try:
         plan = build_add_workflow_plan(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"ok": True, "item": plan["preview"]}
+
+
+@app.post("/api/environments/preview")
+def api_preview_environment(body: EnvironmentAddBody) -> dict[str, Any]:
+    try:
+        plan = build_add_environment_plan(body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
