@@ -333,19 +333,17 @@ export default function EnvironmentAdd() {
           <div className="form-grid form-grid-align-start">
             <label>
               <FieldLabel required>集群</FieldLabel>
-              <ScrollSelect
+              <SearchableSelect
                 required
-                optionCount={options.clusters.length + 1}
+                placeholder="搜索并选择集群"
                 value={form.cluster_name}
                 onChange={(e) => update("cluster_name", e.target.value)}
-              >
-                <option value="">请选择</option>
-                {options.clusters.map((item) => (
-                  <option key={item.name || item.id} value={item.name}>
-                    {clusterOptionLabel(item)}
-                  </option>
-                ))}
-              </ScrollSelect>
+                options={options.clusters.map((item) => ({
+                  value: item.name,
+                  label: clusterOptionLabel(item),
+                }))}
+                emptyText="未找到匹配集群"
+              />
             </label>
             <label>
               <FieldLabel required>命名空间</FieldLabel>
@@ -366,20 +364,18 @@ export default function EnvironmentAdd() {
             </label>
             <label>
               <FieldLabel required>镜像仓库</FieldLabel>
-              <ScrollSelect
+              <SearchableSelect
                 required
-                optionCount={options.registries.length + 1}
+                placeholder="搜索并选择镜像仓库"
                 value={form.registry_id}
                 onChange={(e) => update("registry_id", e.target.value)}
-              >
-                <option value="">请选择</option>
-                {options.registries.map((item) => (
-                  <option key={item.registry_id || item.id} value={item.registry_id || item.id}>
-                    {registryOptionLabel(item)}
-                    {item.is_default ? "（默认）" : ""}
-                  </option>
-                ))}
-              </ScrollSelect>
+                options={options.registries.map((item) => {
+                  const id = String(item.registry_id || item.id || "");
+                  const label = `${registryOptionLabel(item)}${item.is_default ? "（默认）" : ""}`;
+                  return { value: id, label };
+                })}
+                emptyText="未找到匹配镜像仓库"
+              />
             </label>
           </div>
         </section>

@@ -509,19 +509,17 @@ export default function ProjectCreate() {
           <div className="form-grid form-grid-align-start">
             <label>
               <FieldLabel required>集群</FieldLabel>
-              <ScrollSelect
+              <SearchableSelect
                 required
-                optionCount={options.clusters.length + 1}
+                placeholder="搜索并选择集群"
                 value={form.cluster_name}
                 onChange={(e) => update("cluster_name", e.target.value)}
-              >
-                <option value="">请选择</option>
-                {options.clusters.map((item) => (
-                  <option key={item.name || item.id} value={item.name}>
-                    {clusterOptionLabel(item)}
-                  </option>
-                ))}
-              </ScrollSelect>
+                options={options.clusters.map((item) => ({
+                  value: item.name,
+                  label: clusterOptionLabel(item),
+                }))}
+                emptyText="未找到匹配集群"
+              />
             </label>
             <label>
               <FieldLabel required>命名空间</FieldLabel>
@@ -556,74 +554,69 @@ export default function ProjectCreate() {
         </section>
 
         <section className="form-section">
-          <h2>代码源</h2>
+          <h2>代码信息</h2>
           <div className="form-grid">
             <label>
               <FieldLabel required>代码源</FieldLabel>
-              <ScrollSelect
+              <SearchableSelect
                 required
-                optionCount={options.codehosts.length + 1}
+                placeholder="搜索并选择代码源"
                 value={form.codehost_name}
                 onChange={(e) => update("codehost_name", e.target.value)}
-              >
-                <option value="">请选择</option>
-                {options.codehosts.map((item) => (
-                  <option key={item.id} value={item.alias || item.name}>
-                    {codeSourceOptionLabel(item)}
-                  </option>
-                ))}
-              </ScrollSelect>
+                options={options.codehosts.map((item) => ({
+                  value: item.alias || item.name,
+                  label: codeSourceOptionLabel(item),
+                }))}
+                emptyText="未找到匹配代码源"
+              />
             </label>
             <label>
               <FieldLabel required>组织/用户</FieldLabel>
-              <ScrollSelect
+              <SearchableSelect
                 required
+                disabled={!form.codehost_name}
                 loading={Boolean(form.codehost_name && optionsLoading.repoNamespaces)}
-                optionCount={options.repoNamespaces.length + 1}
+                placeholder={form.codehost_name ? "搜索并选择组织/用户" : "请先选择代码源"}
                 value={form.repo_namespace}
                 onChange={(e) => update("repo_namespace", e.target.value)}
-              >
-                <option value="">请选择</option>
-                {options.repoNamespaces.map((item) => (
-                  <option key={item.path || item.name} value={item.path || item.name}>
-                    {item.path || item.name}
-                  </option>
-                ))}
-              </ScrollSelect>
+                options={options.repoNamespaces.map((item) => ({
+                  value: item.path || item.name,
+                  label: item.path || item.name,
+                }))}
+                emptyText="未找到匹配组织/用户"
+              />
             </label>
             <label>
               <FieldLabel required>代码库</FieldLabel>
-              <ScrollSelect
+              <SearchableSelect
                 required
+                disabled={!form.repo_namespace}
                 loading={Boolean(form.repo_namespace && optionsLoading.repos)}
-                optionCount={options.repos.length + 1}
+                placeholder={form.repo_namespace ? "搜索并选择代码库" : "请先选择组织/用户"}
                 value={form.repo_name}
                 onChange={(e) => update("repo_name", e.target.value)}
-              >
-                <option value="">请选择</option>
-                {options.repos.map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {item.name}
-                  </option>
-                ))}
-              </ScrollSelect>
+                options={options.repos.map((item) => ({
+                  value: item.name,
+                  label: item.name,
+                }))}
+                emptyText="未找到匹配代码库"
+              />
             </label>
             <label>
               <FieldLabel required>分支</FieldLabel>
-              <ScrollSelect
+              <SearchableSelect
                 required
+                disabled={!form.repo_name}
                 loading={Boolean(form.repo_name && optionsLoading.branches)}
-                optionCount={options.branches.length + 1}
+                placeholder={form.repo_name ? "搜索并选择分支" : "请先选择代码库"}
                 value={form.branch}
                 onChange={(e) => update("branch", e.target.value)}
-              >
-                <option value="">请选择</option>
-                {options.branches.map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {item.name}
-                  </option>
-                ))}
-              </ScrollSelect>
+                options={options.branches.map((item) => ({
+                  value: item.name,
+                  label: item.name,
+                }))}
+                emptyText="未找到匹配分支"
+              />
             </label>
             <label className="span-2">
               <FieldLabel>Values 文件</FieldLabel>

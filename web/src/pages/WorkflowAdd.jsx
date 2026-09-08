@@ -375,43 +375,36 @@ export default function WorkflowAdd() {
           <div className="form-grid">
             <label className="span-2">
               <FieldLabel required>镜像仓库</FieldLabel>
-              <ScrollSelect
+              <SearchableSelect
                 required
-                optionCount={options.registries.length + 1}
+                placeholder="搜索并选择镜像仓库"
                 value={form.registry_id}
                 onChange={(e) => update("registry_id", e.target.value)}
-              >
-                <option value="">请选择</option>
-                {options.registries.map((item) => {
+                options={options.registries.map((item) => {
                   const id = String(item.registry_id || item.id || "");
-                  return (
-                    <option key={id} value={id}>
-                      {registryOptionLabel(item)}
-                    </option>
-                  );
+                  return { value: id, label: registryOptionLabel(item) };
                 })}
-              </ScrollSelect>
+                emptyText="未找到匹配镜像仓库"
+              />
               {selectedRegistry?.remark ? (
                 <span className="field-hint">{selectedRegistry.remark}</span>
               ) : null}
             </label>
             <label className="span-2">
               <FieldLabel required>服务组件</FieldLabel>
-              <ScrollSelect
+              <SearchableSelect
                 required
                 disabled={!form.project_key}
                 loading={Boolean(form.project_key && optionsLoading.buildServices)}
-                optionCount={options.buildServices.length + 1}
+                placeholder={form.project_key ? "搜索并选择服务组件" : "请先选择项目"}
                 value={form.service_name}
                 onChange={(e) => update("service_name", e.target.value)}
-              >
-                <option value="">{form.project_key ? "请选择" : "请先选择项目"}</option>
-                {options.buildServices.map((item) => (
-                  <option key={`${item.service_name}-${item.build_name}`} value={item.service_name}>
-                    {item.label}
-                  </option>
-                ))}
-              </ScrollSelect>
+                options={options.buildServices.map((item) => ({
+                  value: item.service_name,
+                  label: item.label,
+                }))}
+                emptyText="未找到匹配服务组件"
+              />
               {selectedBuildService ? (
                 <span className="field-hint">
                   构建：{selectedBuildService.build_name} · 镜像：{selectedBuildService.image_name}
@@ -441,29 +434,24 @@ export default function WorkflowAdd() {
             </label>
             <label>
               <FieldLabel required>部署环境</FieldLabel>
-              <ScrollSelect
+              <SearchableSelect
                 required
                 disabled={!form.project_key}
                 loading={Boolean(form.project_key && optionsLoading.deployEnvironments)}
-                optionCount={deployEnvironmentOptions.length + 1}
-                value={form.deploy_env_name}
-                onChange={(e) => update("deploy_env_name", e.target.value)}
-              >
-                <option value="">
-                  {form.project_key
+                placeholder={
+                  form.project_key
                     ? optionsLoading.deployEnvironments
                       ? "加载中…"
                       : deployEnvironmentOptions.length
-                        ? "请选择"
+                        ? "搜索并选择部署环境"
                         : "当前类型下无可用环境"
-                    : "请先选择项目"}
-                </option>
-                {deployEnvironmentOptions.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </ScrollSelect>
+                    : "请先选择项目"
+                }
+                value={form.deploy_env_name}
+                onChange={(e) => update("deploy_env_name", e.target.value)}
+                options={deployEnvironmentOptions}
+                emptyText="未找到匹配环境"
+              />
             </label>
           </div>
           <p className="field-hint">
