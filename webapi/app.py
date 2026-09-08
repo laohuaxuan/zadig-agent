@@ -680,18 +680,31 @@ def api_code_namespaces(codehost: str) -> dict[str, Any]:
 
 
 @app.get("/api/code-sources/{codehost}/repos")
-def api_code_repos(codehost: str, namespace: str) -> dict[str, Any]:
+def api_code_repos(
+    codehost: str,
+    namespace: str,
+    key: str = "",
+    page: int = 1,
+    per_page: int = 100,
+) -> dict[str, Any]:
     try:
-        items = list_repos(codehost, namespace)
+        items = list_repos(codehost, namespace, keyword=key, page=page, per_page=per_page)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"ok": True, "items": items}
 
 
 @app.get("/api/code-sources/{codehost}/branches")
-def api_code_branches(codehost: str, namespace: str, repo: str) -> dict[str, Any]:
+def api_code_branches(
+    codehost: str,
+    namespace: str,
+    repo: str,
+    key: str = "",
+    page: int = 1,
+    per_page: int = 100,
+) -> dict[str, Any]:
     try:
-        items = list_branches(codehost, namespace, repo)
+        items = list_branches(codehost, namespace, repo, keyword=key, page=page, per_page=per_page)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"ok": True, "items": items}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BuildVariableOptionsModal from "../components/BuildVariableOptionsModal.jsx";
 import ScrollSelect from "../components/ScrollSelect.jsx";
 import SearchableSelect from "../components/SearchableSelect.jsx";
@@ -362,6 +362,24 @@ export default function ServiceAdd() {
       .then((data) => setOptions((prev) => ({ ...prev, branches: data.items || [] })))
       .catch((err) => setError(err.message))
       .finally(() => setOptionsLoading((prev) => ({ ...prev, branches: false })));
+  }, [form.codehost_name, form.repo_namespace, form.repo_name]);
+
+  const searchRepos = useCallback(async (keyword) => {
+    if (!form.codehost_name || !form.repo_namespace) return [];
+    const data = await fetchCodeRepos(form.codehost_name, form.repo_namespace, {
+      key: keyword,
+      perPage: 100,
+    });
+    return (data.items || []).map((item) => ({ value: item.name, label: item.name }));
+  }, [form.codehost_name, form.repo_namespace]);
+
+  const searchBranches = useCallback(async (keyword) => {
+    if (!form.codehost_name || !form.repo_namespace || !form.repo_name) return [];
+    const data = await fetchCodeBranches(form.codehost_name, form.repo_namespace, form.repo_name, {
+      key: keyword,
+      perPage: 100,
+    });
+    return (data.items || []).map((item) => ({ value: item.name, label: item.name }));
   }, [form.codehost_name, form.repo_namespace, form.repo_name]);
 
   function update(key, value) {
@@ -841,6 +859,7 @@ export default function ServiceAdd() {
                   value: item.name,
                   label: item.name,
                 }))}
+                onSearch={searchRepos}
                 emptyText="未找到匹配代码库"
               />
             </label>
@@ -857,6 +876,7 @@ export default function ServiceAdd() {
                   value: item.name,
                   label: item.name,
                 }))}
+                onSearch={searchBranches}
                 emptyText="未找到匹配分支"
               />
             </label>

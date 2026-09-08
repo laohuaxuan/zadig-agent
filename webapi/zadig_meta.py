@@ -221,13 +221,29 @@ def _repo_owner(codehost: str, namespace: str) -> tuple[str, str]:
     return text, "group"
 
 
-def list_repos(codehost: str, namespace: str) -> list[dict[str, Any]]:
+def list_repos(
+    codehost: str,
+    namespace: str,
+    *,
+    keyword: str = "",
+    page: int = 1,
+    per_page: int = 100,
+) -> list[dict[str, Any]]:
     cid = _codehost_id(codehost)
     repo_owner, ns_type = _repo_owner(codehost, namespace)
+    params: dict[str, Any] = {
+        "repoOwner": repo_owner,
+        "type": ns_type,
+        "page": max(1, int(page or 1)),
+        "per_page": min(100, max(1, int(per_page or 100))),
+    }
+    key = str(keyword or "").strip()
+    if key:
+        params["key"] = key
     data = zadig_request(
         "GET",
         f"/api/aslan/code/codehost/{cid}/projects",
-        params={"repoOwner": repo_owner, "type": ns_type},
+        params=params,
     )
     items: list[Any] = data if isinstance(data, list) else []
     out: list[dict[str, Any]] = []
@@ -255,14 +271,31 @@ def _as_name_items(data: Any) -> list[dict[str, Any]]:
     return []
 
 
-def list_branches(codehost: str, namespace: str, repo: str) -> list[dict[str, Any]]:
+def list_branches(
+    codehost: str,
+    namespace: str,
+    repo: str,
+    *,
+    keyword: str = "",
+    page: int = 1,
+    per_page: int = 100,
+) -> list[dict[str, Any]]:
     cid = _codehost_id(codehost)
     repo_owner, _ = _repo_owner(codehost, namespace)
     repo_name = str(repo or "").strip()
+    params: dict[str, Any] = {
+        "repoOwner": repo_owner,
+        "repoName": repo_name,
+        "page": max(1, int(page or 1)),
+        "per_page": min(100, max(1, int(per_page or 100))),
+    }
+    key = str(keyword or "").strip()
+    if key:
+        params["key"] = key
     data = zadig_request(
         "GET",
         f"/api/aslan/code/codehost/{cid}/branches",
-        params={"repoOwner": repo_owner, "repoName": repo_name},
+        params=params,
     )
     return _as_name_items(data if isinstance(data, list) else (data or {}).get("branches") if isinstance(data, dict) else [])
 

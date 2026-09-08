@@ -28,6 +28,9 @@ export default function SearchableSelect({
   className = "",
   onFocus,
   onBlur,
+  onSearch,
+  searchDebounceMs = 300,
+  searchingLabel = "正在搜索…",
   name,
   id: idProp,
 }) {
@@ -36,22 +39,52 @@ export default function SearchableSelect({
   const wrapRef = useRef(null);
   const listRef = useRef(null);
   const inputRef = useRef(null);
+  const onSearchRef = useRef(onSearch);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [remoteOptions, setRemoteOptions] = useState([]);
+  const [searching, setSearching] = useState(false);
+
+  onSearchRef.current = onSearch;
 
   const normalized = useMemo(() => normalizeOptions(options), [options]);
   const selected = normalized.find((item) => item.value === String(value ?? ""));
 
   const filtered = useMemo(() => {
+    if (onSearch && query.trim()) {
+      return remoteOptions;
+    }
     const text = query.trim().toLowerCase();
     if (!text) return normalized;
     return normalized.filter(
       (item) => item.label.toLowerCase().includes(text) || item.value.toLowerCase().includes(text),
     );
-  }, [normalized, query]);
+  }, [normalized, onSearch, query, remoteOptions]);
 
   const visibleCount = Math.min(Math.max(filtered.length, 1), MAX_VISIBLE);
+
+  useEffect(() => {
+    if (!onSearchRef.current || !open) return undefined;
+    const text = query.trim();
+    if (!text) {
+      setRemoteOptions([]);
+      setSearching(false);
+      return undefined;
+    }
+    setSearching(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await onSearchRef.current(text);
+        setRemoteOptions(normalizeOptions(result));
+      } catch {
+        setRemoteOptions([]);
+      } finally {
+        setSearching(false);
+      }
+    }, searchDebounceMs);
+    return () => window.clearTimeout(timer);
+  }, [open, query, searchDebounceMs]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -83,13 +116,15 @@ export default function SearchableSelect({
     if (disabled || loading) return;
     setQuery(initialQuery);
     setOpen(true);
-    const list = initialQuery.trim()
-      ? normalized.filter(
-          (item) =>
-            item.label.toLowerCase().includes(initialQuery.trim().toLowerCase()) ||
-            item.value.toLowerCase().includes(initialQuery.trim().toLowerCase()),
-        )
-      : normalized;
+    const list = onSearch && initialQuery.trim()
+      ? remoteOptions
+      : initialQuery.trim()
+        ? normalized.filter(
+            (item) =>
+              item.label.toLowerCase().includes(initialQuery.trim().toLowerCase()) ||
+              item.value.toLowerCase().includes(initialQuery.trim().toLowerCase()),
+          )
+        : normalized;
     const selectedIndex = list.findIndex((item) => item.value === String(value ?? ""));
     setActiveIndex(selectedIndex >= 0 ? selectedIndex : list.length ? 0 : -1);
   }
@@ -128,6 +163,10 @@ export default function SearchableSelect({
     setQuery(nextQuery);
     if (!open) setOpen(true);
     if (allowCustom) emitChange(nextQuery);
+    if (onSearch && nextQuery.trim()) {
+      setActiveIndex(0);
+      return;
+    }
     const list = nextQuery.trim()
       ? normalized.filter(
           (item) =>
@@ -220,7 +259,7 @@ export default function SearchableSelect({
           type="text"
           className="searchable-select-input"
           value={displayValue()}
-          placeholder={loading ? loadingLabel : placeholder}
+          placeholder={loading ? loadingLabel : searching ? searchingLabel : placeholder}
           disabled={disabled || loading}
           autoComplete="off"
           role="combobox"
@@ -259,7 +298,9 @@ export default function SearchableSelect({
           aria-labelledby={id}
           style={{ maxHeight: visibleCount * OPTION_HEIGHT }}
         >
-          {filtered.length === 0 ? (
+          {searching ? (
+            <li className="scroll-select-option is-disabled">{searchingLabel}</li>
+          ) : filtered.length === 0 ? (
             <li className="scroll-select-option is-disabled">{emptyText}</li>
           ) : (
             filtered.map((item, index) => (

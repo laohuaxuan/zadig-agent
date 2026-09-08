@@ -87,16 +87,22 @@ export function fetchCodeNamespaces(codehost) {
   return request(`/api/code-sources/${encodeURIComponent(codehost)}/namespaces`);
 }
 
-export function fetchCodeRepos(codehost, namespace) {
+export function fetchCodeRepos(codehost, namespace, { key = "", page = 1, perPage = 100 } = {}) {
   const url = new URL(`/api/code-sources/${encodeURIComponent(codehost)}/repos`, window.location.origin);
   url.searchParams.set("namespace", namespace);
+  if (key) url.searchParams.set("key", key);
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("per_page", String(perPage));
   return request(`${url.pathname}${url.search}`);
 }
 
-export function fetchCodeBranches(codehost, namespace, repo) {
+export function fetchCodeBranches(codehost, namespace, repo, { key = "", page = 1, perPage = 100 } = {}) {
   const url = new URL(`/api/code-sources/${encodeURIComponent(codehost)}/branches`, window.location.origin);
   url.searchParams.set("namespace", namespace);
   url.searchParams.set("repo", repo);
+  if (key) url.searchParams.set("key", key);
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("per_page", String(perPage));
   return request(`${url.pathname}${url.search}`);
 }
 
