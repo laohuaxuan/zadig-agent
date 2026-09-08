@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import BuildVariableOptionsModal from "../components/BuildVariableOptionsModal.jsx";
 import ScrollSelect from "../components/ScrollSelect.jsx";
 import SearchableSelect from "../components/SearchableSelect.jsx";
 import SubmitToast from "../components/SubmitToast.jsx";
@@ -26,6 +27,11 @@ const VAR_TYPES = [
   { value: "multi-select", label: "多选" },
 ];
 
+const VAR_SCOPES = [
+  { value: "env", label: "环境变量" },
+  { value: "build", label: "构建变量" },
+];
+
 function slugKey(name) {
   return String(name || "")
     .trim()
@@ -47,7 +53,11 @@ function zadigUserLabel(users, uid, fallback = "—") {
 }
 
 function emptyVarRow() {
-  return { key: "", type: "string", value: "", options: "", multi_value: [] };
+  return { key: "", type: "string", value: "", options: "", multi_value: [], scope: "env", description: "" };
+}
+
+function isChoiceLikeType(type) {
+  return type === "choice" || type === "multi-select";
 }
 
 function parseOptions(text) {
@@ -132,6 +142,7 @@ export default function ProjectCreate() {
     users: [],
   });
   const [valuesPickerOpen, setValuesPickerOpen] = useState(false);
+  const [optionsModalIndex, setOptionsModalIndex] = useState(-1);
   const envNameTouched = useRef(false);
   const namespaceTouched = useRef(false);
   const projectKeyTouched = useRef(false);
@@ -325,6 +336,46 @@ export default function ProjectCreate() {
       ...prev,
       [name]: prev[name].map((row, i) => (i === index ? { ...row, [key]: value } : row)),
     }));
+  }
+
+  function openOptionsModal(index) {
+    setOptionsModalIndex(index);
+  }
+
+  function closeOptionsModal() {
+    setOptionsModalIndex(-1);
+  }
+
+  function handleVariableTypeChange(index, nextType) {
+    updateList("build_variables", index, "type", nextType);
+    if (isChoiceLikeType(nextType)) {
+      openOptionsModal(index);
+    }
+  }
+
+  function handleOptionsConfirm({ key, options, description }) {
+    if (optionsModalIndex < 0) return;
+    const optionsText = options.join(",");
+    setForm((prev) => ({
+      ...prev,
+      build_variables: prev.build_variables.map((row, index) => {
+        if (index !== optionsModalIndex) return row;
+        const next = {
+          ...row,
+          key,
+          options: optionsText,
+          description,
+        };
+        if (row.type === "choice") {
+          next.value = options.includes(row.value) ? row.value : options[0] || "";
+        }
+        if (row.type === "multi-select") {
+          next.multi_value = (row.multi_value || []).filter((item) => options.includes(item));
+        }
+        return next;
+      }),
+    }));
+    closeOptionsModal();
   }
 
   function toggleMultiValue(index, option) {
@@ -681,28 +732,32 @@ export default function ProjectCreate() {
         <section className="form-section">
           <div className="section-head">
             <h2>
-              构建变量 <span className="optional-mark">（可选）</span>
+              变量配置 <span className="optional-mark">（可选）</span>
             </h2>
             <button type="button" className="config-btn" onClick={() => addListRow("build_variables", emptyVarRow)}>
               添加变量
             </button>
           </div>
           {form.build_variables.length === 0 ? (
-            <p className="field-hint">可选。支持字符串、单选、多选三种类型。</p>
+            <p className="field-hint">
+              可选。支持字符串、单选、多选三种类型；构建变量审核通过后将自动写入 Docker 构建参数。
+            </p>
           ) : null}
           {form.build_variables.map((row, index) => {
             const choiceOptions = parseOptions(row.options);
+            const rowClassName = [
+              "build-var-row",
+              row.type === "choice" ? "is-choice" : "",
+              row.type === "multi-select" ? "is-multi" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
             return (
-              <div className="build-var-row" key={`var-${index}`}>
-                <input
-                  value={row.key}
-                  onChange={(e) => updateList("build_variables", index, "key", e.target.value)}
-                  placeholder="变量名"
-                />
+              <div className={rowClassName} key={`var-${index}`}>
                 <ScrollSelect
                   optionCount={VAR_TYPES.length}
                   value={row.type}
-                  onChange={(e) => updateList("build_variables", index, "type", e.target.value)}
+                  onChange={(e) => handleVariableTypeChange(index, e.target.value)}
                 >
                   {VAR_TYPES.map((item) => (
                     <option key={item.value} value={item.value}>
@@ -710,6 +765,11 @@ export default function ProjectCreate() {
                     </option>
                   ))}
                 </ScrollSelect>
+                <input
+                  value={row.key}
+                  onChange={(e) => updateList("build_variables", index, "key", e.target.value)}
+                  placeholder="变量名"
+                />
                 {row.type === "string" ? (
                   <input
                     value={row.value}
@@ -717,11 +777,9 @@ export default function ProjectCreate() {
                     placeholder="默认值"
                   />
                 ) : (
-                  <input
-                    value={row.options}
-                    onChange={(e) => updateList("build_variables", index, "options", e.target.value)}
-                    placeholder="选项，逗号分隔"
-                  />
+                  <button type="button" className="config-btn build-var-config-btn" onClick={() => openOptionsModal(index)}>
+                    {choiceOptions.length ? `已配置 ${choiceOptions.length} 个可选值` : "配置可选值"}
+                  </button>
                 )}
                 {row.type === "choice" ? (
                   <ScrollSelect
@@ -755,6 +813,17 @@ export default function ProjectCreate() {
                     )}
                   </div>
                 ) : null}
+                <ScrollSelect
+                  optionCount={VAR_SCOPES.length}
+                  value={row.scope || "env"}
+                  onChange={(e) => updateList("build_variables", index, "scope", e.target.value)}
+                >
+                  {VAR_SCOPES.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </ScrollSelect>
                 <button type="button" className="link-btn danger" onClick={() => removeListRow("build_variables", index)}>
                   删除
                 </button>
@@ -858,6 +927,15 @@ export default function ProjectCreate() {
         value={form.values_file}
         onClose={() => setValuesPickerOpen(false)}
         onSelect={(path) => update("values_file", path)}
+      />
+      <BuildVariableOptionsModal
+        open={optionsModalIndex >= 0}
+        type={form.build_variables[optionsModalIndex]?.type === "multi-select" ? "multi-select" : "choice"}
+        initialKey={form.build_variables[optionsModalIndex]?.key || ""}
+        initialOptions={parseOptions(form.build_variables[optionsModalIndex]?.options)}
+        initialDescription={form.build_variables[optionsModalIndex]?.description || ""}
+        onClose={closeOptionsModal}
+        onConfirm={handleOptionsConfirm}
       />
     </section>
   );

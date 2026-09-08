@@ -122,13 +122,23 @@ def list_skills() -> list[dict[str, Any]]:
 
 
 def sync_file_skills_to_db() -> None:
-    """将 skills/ 目录下尚未入库的 Skill 导入 MySQL。"""
+    """将 skills/ 目录下的 Skill 同步到 MySQL（已存在则更新 content）。"""
     for item in list_file_skills():
         name = item["name"]
-        if query_one("SELECT name FROM skills WHERE name = %s AND kind = 'skill'", (name,)):
-            continue
         content = str(item.get("content") or "").strip()
         if not content:
+            continue
+        display_name = str(item.get("display_name") or name).strip() or name
+        description = str(item.get("description") or "").strip()
+        if query_one("SELECT name FROM skills WHERE name = %s AND kind = 'skill'", (name,)):
+            execute(
+                """
+                UPDATE skills
+                SET display_name = %s, description = %s, content = %s, updated_at = NOW()
+                WHERE name = %s AND kind = 'skill'
+                """,
+                (display_name, description, content, name),
+            )
             continue
         execute(
             """
@@ -136,7 +146,7 @@ def sync_file_skills_to_db() -> None:
             (name, kind, display_name, description, content, transport, command, args_json, url, created_at, updated_at)
             VALUES (%s, 'skill', %s, %s, %s, '', '', JSON_ARRAY(), '', NOW(), NOW())
             """,
-            (name, item["display_name"], item.get("description") or "", content),
+            (name, display_name, description, content),
         )
 
 

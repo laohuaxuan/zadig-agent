@@ -1157,10 +1157,38 @@ textarea.field-input-error:focus {
 
 .build-var-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) 110px minmax(140px, 1fr) minmax(160px, 1.2fr) auto;
+  grid-template-columns: 110px minmax(120px, 1fr) minmax(140px, 1fr) 120px auto;
   gap: 8px;
   margin-bottom: 8px;
-  align-items: start;
+  align-items: center;
+}
+
+.build-var-row.is-choice,
+.build-var-row.is-multi {
+  grid-template-columns: 110px minmax(120px, 1fr) minmax(140px, 1fr) minmax(160px, 1.2fr) 120px auto;
+}
+
+.build-var-row input {
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 14px;
+}
+
+.build-var-row .scroll-select-trigger {
+  min-height: 44px;
+  padding: 11px 14px;
+}
+
+.build-var-row .link-btn.danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 4px;
+  white-space: nowrap;
 }
 
 .path-input {
@@ -1198,6 +1226,13 @@ textarea.field-input-error:focus {
   border-radius: 8px;
   background: #fff;
   min-height: 38px;
+}
+
+.build-var-row .multi-select-box {
+  min-height: 44px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border-color: #d1d5db;
 }
 
 .multi-select-box .check-row {
@@ -1753,6 +1788,116 @@ select.scroll-select[size] {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid #f3f4f6;
+}
+
+.build-var-options-dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 24px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.18);
+}
+
+.build-var-options-dialog .dialog-head {
+  margin-bottom: 16px;
+}
+
+.build-var-options-dialog .dialog-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.build-var-options-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.build-var-options-field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.build-var-options-field input,
+.build-var-options-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: #fff;
+}
+
+.build-var-options-field textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.build-var-options-field input:focus,
+.build-var-options-field textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.build-var-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.build-var-option-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 8px;
+  align-items: center;
+}
+
+.build-var-option-remove {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #dc2626;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.build-var-option-remove:hover {
+  background: #fecaca;
+}
+
+.build-var-option-add {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #2563eb;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.build-var-option-add:disabled {
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.build-var-options-dialog .dialog-actions {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.build-var-config-btn {
+  min-height: 44px;
+  width: 100%;
+  justify-content: center;
 }
 
 @media (max-width: 800px) {

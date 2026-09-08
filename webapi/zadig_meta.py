@@ -371,7 +371,11 @@ def _normalize_build_parameters(items: list[dict[str, Any]] | None) -> list[dict
         if ptype not in {"string", "choice", "multi-select"}:
             raise ValueError(f"构建变量 {key} 的类型无效")
         if ptype == "string":
-            out.append({"key": key, "type": "string", "default_value": str(item.get("value") or "")})
+            row: dict[str, Any] = {"key": key, "type": "string", "default_value": str(item.get("value") or "")}
+            description = str(item.get("description") or "").strip()
+            if description:
+                row["description"] = description
+            out.append(row)
             continue
         raw_options = item.get("options")
         if isinstance(raw_options, list):
@@ -390,6 +394,7 @@ def _normalize_build_parameters(items: list[dict[str, Any]] | None) -> list[dict
                     "type": "choice",
                     "default_value": default_value,
                     "choice_option": choice_option,
+                    **({"description": description} if (description := str(item.get("description") or "").strip()) else {}),
                 }
             )
             continue
@@ -406,22 +411,36 @@ def _normalize_build_parameters(items: list[dict[str, Any]] | None) -> list[dict
                 "default_value": ",".join(choice_value),
                 "choice_option": choice_option,
                 "choice_value": choice_value,
+                **({"description": description} if (description := str(item.get("description") or "").strip()) else {}),
             }
         )
     return out
 
 
-def _normalize_build_args(items: list[dict[str, Any]] | None) -> str:
-    lines: list[str] = []
+def _split_build_variables(items: list[dict[str, Any]] | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    env_items: list[dict[str, Any]] = []
+    build_items: list[dict[str, Any]] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        scope = str(item.get("scope") or "env").strip().lower()
+        if scope == "build":
+            build_items.append(item)
+        else:
+            env_items.append(item)
+    return env_items, build_items
+
+
+def _normalize_docker_build_args(items: list[dict[str, Any]] | None) -> str:
+    parts: list[str] = []
     for item in items or []:
         if not isinstance(item, dict):
             continue
         key = str(item.get("key") or "").strip()
         if not key:
             continue
-        value = str(item.get("value") or "")
-        lines.append(f"{key}={value}")
-    return "\n".join(lines)
+        parts.append(f"--build-arg {key}=${{{key}}}")
+    return " ".join(parts)
 
 
 def list_helm_projects(page_num: int = 1, page_size: int = 200) -> tuple[list[dict[str, str]], int]:
@@ -818,11 +837,26 @@ def _build_helm_env_service(data: dict[str, Any], service_row: dict[str, Any]) -
     return payload
 
 
+def _build_project_execution_hints(data: dict[str, Any], service_row: dict[str, Any], workflow: dict[str, Any]) -> dict[str, str]:
+    if service_row.get("import_values_from_git"):
+        values_hint = f"已配置 Git Values：{data.get('values_file') or ''}"
+    else:
+        values_hint = "未配置 Values 文件，使用 Chart 默认值；add_helm_services 时不要传 import_values_from_git"
+    return {
+        "values_file": values_hint,
+        "installs": "build.installs 为空列表 []，合法且无需补充构建依赖",
+        "registry_id": f"使用 workflow.registry_id={workflow.get('registry_id') or ''}，无需询问镜像仓库",
+        "confirmation": "执行计划已由用户审批，参数完整；收到开始后立即调用 create_helm_project，不要重复确认",
+    }
+
+
 def build_project_plan(payload: dict[str, Any]) -> dict[str, Any]:
     data = _validate_project_input(payload)
     service_row = _build_service_row(data)
     helm_env_service = _build_helm_env_service(data, service_row)
-    build_parameters = _normalize_build_parameters(data["build_variables"])
+    env_variables, build_arg_variables = _split_build_variables(data["build_variables"])
+    build_parameters = _normalize_build_parameters(env_variables + build_arg_variables)
+    build_args = _normalize_docker_build_args(build_arg_variables)
     helm_project = {
         "project_name": data["project_name"],
         "project_key": data["project_key"],
@@ -859,7 +893,7 @@ def build_project_plan(payload: dict[str, Any]) -> dict[str, Any]:
             "dockerfile_source": "local",
             "dockerfile_directory": data["dockerfile_path"],
             "build_context_dir": data["build_context_dir"],
-            "build_args": "",
+            "build_args": build_args,
             "enable_buildkit": True,
             "platforms": "linux/amd64",
             "template_name": data["build_template_name"],
@@ -924,9 +958,9 @@ def build_project_plan(payload: dict[str, Any]) -> dict[str, Any]:
                 ],
             },
             {
-                "title": "构建变量",
+                "title": "变量配置",
                 "items": [
-                    {"label": item["key"], "value": _format_build_variable(item)}
+                    {"label": _format_build_variable_label(item), "value": _format_build_variable(item)}
                     for item in data["build_variables"]
                     if isinstance(item, dict) and str(item.get("key") or "").strip()
                 ]
@@ -948,6 +982,7 @@ def build_project_plan(payload: dict[str, Any]) -> dict[str, Any]:
         "build": build,
         "role_bindings": role_bindings,
         "workflow": workflow,
+        "execution_hints": _build_project_execution_hints(data, service_row, workflow),
     }
     if helm_env_service:
         agent["helm_env_service"] = helm_env_service
@@ -1080,7 +1115,9 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
     build_info = _resolve_build_for_service(data["project_key"], data["service_name"])
     build_exists = build_info is not None
     build_name = str((build_info or {}).get("build_name") or data["build_name"]).strip()
-    build_parameters = _normalize_build_parameters(data["build_variables"])
+    env_variables, build_arg_variables = _split_build_variables(data["build_variables"])
+    build_parameters = _normalize_build_parameters(env_variables + build_arg_variables)
+    build_args = _normalize_docker_build_args(build_arg_variables)
     helm_service: dict[str, Any] = {
         "project_key": data["project_key"],
         "service_name": data["service_name"],
@@ -1120,7 +1157,7 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
             "dockerfile_source": "local",
             "dockerfile_directory": data["dockerfile_path"],
             "build_context_dir": data["build_context_dir"],
-            "build_args": "",
+            "build_args": build_args,
             "enable_buildkit": True,
             "platforms": "linux/amd64",
             "template_name": data["build_template_name"],
@@ -1154,6 +1191,7 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if not production:
         agent["build"] = build
+        agent["execution_hints"] = _build_project_execution_hints(data, service_row, workflow)
     if not env_exists:
         agent["helm_environment"] = {
             "project_key": data["project_key"],
@@ -1203,9 +1241,9 @@ def build_add_service_plan(payload: dict[str, Any]) -> dict[str, Any]:
                 ],
             },
             {
-                "title": "构建变量",
+                "title": "变量配置",
                 "items": [
-                    {"label": item["key"], "value": _format_build_variable(item)}
+                    {"label": _format_build_variable_label(item), "value": _format_build_variable(item)}
                     for item in data["build_variables"]
                     if isinstance(item, dict) and str(item.get("key") or "").strip()
                 ]
@@ -1599,22 +1637,34 @@ def build_application_plan(payload: dict[str, Any]) -> dict[str, Any]:
     return build_project_plan(payload)
 
 
+def _format_build_variable_label(item: dict[str, Any]) -> str:
+    key = str(item.get("key") or "").strip()
+    scope = str(item.get("scope") or "env").strip().lower()
+    scope_label = "构建变量" if scope == "build" else "环境变量"
+    return f"{scope_label} · {key}"
+
+
 def _format_build_variable(item: dict[str, Any]) -> str:
+    scope = str(item.get("scope") or "env").strip().lower()
     key = str(item.get("key") or "").strip()
     ptype = str(item.get("type") or "string")
     if ptype == "string":
-        return str(item.get("value") or "")
-    if ptype == "choice":
+        detail = str(item.get("value") or "")
+    elif ptype == "choice":
         options = str(item.get("options") or "")
         value = str(item.get("value") or "")
-        return f"{value}（选项：{options}）"
-    multi = item.get("multi_value") or []
-    if isinstance(multi, list):
-        selected = ", ".join(str(v) for v in multi if str(v).strip())
+        detail = f"{value}（选项：{options}）"
     else:
-        selected = str(item.get("value") or "")
-    options = str(item.get("options") or "")
-    return f"{selected}（选项：{options}）"
+        multi = item.get("multi_value") or []
+        if isinstance(multi, list):
+            selected = ", ".join(str(v) for v in multi if str(v).strip())
+        else:
+            selected = str(item.get("value") or "")
+        options = str(item.get("options") or "")
+        detail = f"{selected}（选项：{options}）"
+    if scope == "build":
+        return f"{detail}（自动写入：--build-arg {key}=${{{key}}}）"
+    return detail
 
 
 def create_project(payload: dict[str, Any]) -> dict[str, Any]:

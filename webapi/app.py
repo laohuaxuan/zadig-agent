@@ -323,6 +323,8 @@ class BuildVariable(BaseModel):
     value: str = ""
     options: str = ""
     multi_value: list[str] = []
+    scope: str = "env"
+    description: str = ""
 
 
 class AuthorizedUser(BaseModel):

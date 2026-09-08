@@ -436,7 +436,14 @@ async def run_project_create_agent(
             "在完成 Skill 规定的全部必做步骤之前不要输出最终总结。\n"
             "create_workflow 必须使用执行计划中 workflow.template_name 指定的模板。"
             "全部必做步骤成功后再用中文简要总结结果。\n"
-            f"仅在需要用户确认参数、选择或关键操作前，在回复末尾单独一行输出 `{_CONFIRM_MARKER}`。"
+            + (
+                "执行计划 JSON 已由用户在前端填写并审批；Values 文件未配置时使用 Chart 默认值，"
+                "build.installs 为空列表 [] 合法，workflow.registry_id 已给定。"
+                "收到开始指令后立即调用第一步 MCP 工具，不要先向用户确认计划内容。\n"
+                if not (is_add_workflow or is_add_environment or is_add_service)
+                else ""
+            )
+            + f"仅在执行计划缺少必做步骤所需字段且无法推断时，在回复末尾单独一行输出 `{_CONFIRM_MARKER}`。"
             "任务全部完成后的最终总结不要加此标记。"
         )
         checkpoint_thread_id = str(thread_id or new_llm_session_id("zadig-agent"))
