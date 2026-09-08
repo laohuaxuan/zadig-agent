@@ -1,8 +1,24 @@
 # zadig-agent
 
-把 Zadig OpenAPI 封装成 MCP 工具，供 Cursor 或其他 Agent 调用。也包含一个本地 LangGraph Agent。
+把 Zadig OpenAPI 封装成 MCP 工具，供 Cursor 或其他 Agent 调用。也包含一个本地 LangGraph Agent，以及基于 Web 的申请、审批与 Agent 执行平台。
 
 默认 **stdio**（Cursor / 本机进程拉起）。需要外部 Agent 访问时，再开 **SSE**。
+
+## 平台界面
+
+Web 端提供 Helm 项目申请、添加服务、添加环境、添加工作流等表单，并与审批流、Agent 执行打通。用户在页面填写配置并提交申请，审批通过后由 Agent 自动调用 Zadig MCP 完成创建。
+
+### 创建项目
+
+支持填写基本信息、K8s 集群与命名空间、代码信息（代码源 / 组织 / 代码库 / 分支）、Values 文件、构建变量等；下拉框支持模糊搜索，代码库与分支走 Zadig 服务端检索。
+
+![创建项目表单](docs/screenshots/project-create.png)
+
+### Agent 执行
+
+审批通过后，平台按申请内容生成执行计划，由配置的 Agent 调用 Skill 与 MCP 工具在 Zadig 侧落地。执行过程可查看终端输出、处理结果摘要，并一键跳转 Zadig 项目页。
+
+![Agent 执行界面](docs/screenshots/agent-execution.png)
 
 ## 准备
 
@@ -162,8 +178,9 @@ stdio 不能被外网访问。流程：本机 SSE → HTTPS 反代或隧道 → 
 cd web && npm install && npm run dev
 ```
 
-浏览器打开 `http://127.0.0.1:5173`。
+浏览器打开 `http://127.0.0.1:5173`。界面与能力概览见上文 [平台界面](#平台界面)。
 
+- **项目管理**：创建项目、添加服务、添加环境、添加工作流（表单 + 审批 + Agent 执行）
 - 系统设置 → 系统集成：从 Zadig 同步代码源、集群、镜像仓库、用户
 - 技能 → Skills：仓库示例 + 页面新建（写入 MySQL）
 - 技能 → MCP：内置工具 + 页面新建的 MCP 技能（写入 MySQL）
