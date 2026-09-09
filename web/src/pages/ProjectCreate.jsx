@@ -18,6 +18,7 @@ import {
   codeSourceOptionLabel,
   serviceTemplateOptionLabel,
 } from "../utils/integrationOptions.js";
+import { defaultBuildVariables } from "../utils/buildVariables.js";
 
 const APPLICANT_ROLE = "project-admin";
 
@@ -127,7 +128,7 @@ export default function ProjectCreate() {
     values_auto_sync: true,
     build_context_dir: "",
     dockerfile_suffix: "Dockerfile",
-    build_variables: [],
+    build_variables: defaultBuildVariables(),
     authorized_users: [],
   });
   const [options, setOptions] = useState({

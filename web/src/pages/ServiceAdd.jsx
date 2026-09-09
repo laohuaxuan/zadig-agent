@@ -19,6 +19,7 @@ import {
   codeSourceOptionLabel,
   serviceTemplateOptionLabel,
 } from "../utils/integrationOptions.js";
+import { defaultBuildVariables } from "../utils/buildVariables.js";
 
 const ENV_TYPE_OPTIONS = [
   { value: "false", label: "测试环境" },
@@ -49,7 +50,7 @@ const INITIAL_FORM = {
   values_auto_sync: true,
   build_context_dir: "",
   dockerfile_suffix: "Dockerfile",
-  build_variables: [],
+  build_variables: defaultBuildVariables(),
 };
 
 const VAR_TYPES = [
@@ -177,7 +178,7 @@ export default function ServiceAdd() {
   function resetForm() {
     workflowNameTouched.current = false;
     namespaceTouched.current = false;
-    setForm({ ...INITIAL_FORM });
+    setForm({ ...INITIAL_FORM, build_variables: defaultBuildVariables() });
     setServiceCheck({ exists: false, blocked: false, message: "", reason: "" });
   }
 
