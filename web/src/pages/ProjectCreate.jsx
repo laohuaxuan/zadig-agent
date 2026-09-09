@@ -76,11 +76,11 @@ function joinContextPath(context, suffix) {
   return `${base}/${rest}`;
 }
 
-function defaultWorkflowName(projectKey, projectName, environment) {
-  const key = projectKeyPrefix(projectKey, projectName);
+function defaultWorkflowName(serviceName, environment) {
+  const svc = String(serviceName || "").trim();
   const env = String(environment || "dev").trim();
-  if (!key) return "";
-  return env ? `${key}-${env}` : key;
+  if (!svc) return "";
+  return env ? `${svc}-${env}` : svc;
 }
 
 function projectKeyPrefix(projectKey, projectName) {
@@ -168,8 +168,8 @@ export default function ProjectCreate() {
   );
 
   const suggestedWorkflowName = useMemo(
-    () => defaultWorkflowName(form.project_key, form.project_name, form.environment),
-    [form.project_key, form.project_name, form.environment],
+    () => defaultWorkflowName(form.service_name, form.environment),
+    [form.service_name, form.environment],
   );
 
   const dockerfilePath = useMemo(
@@ -324,18 +324,16 @@ export default function ProjectCreate() {
           next.service_name = derived;
         }
         if (!workflowNameTouched.current) {
-          next.workflow_name = defaultWorkflowName(next.project_key, value, next.environment);
+          next.workflow_name = defaultWorkflowName(next.service_name, next.environment);
         }
       }
-      if (key === "project_key") {
-        if (!workflowNameTouched.current) {
-          next.workflow_name = defaultWorkflowName(value, next.project_name, next.environment);
-        }
+      if (key === "service_name" && !workflowNameTouched.current) {
+        next.workflow_name = defaultWorkflowName(value, next.environment);
       }
       if (key === "environment") {
         envNameTouched.current = true;
         if (!workflowNameTouched.current) {
-          next.workflow_name = defaultWorkflowName(next.project_key || prev.project_key, next.project_name, value);
+          next.workflow_name = defaultWorkflowName(next.service_name, value);
         }
       }
       if (key === "repo_name" && value) {
@@ -565,12 +563,12 @@ export default function ProjectCreate() {
                 required
                 value={form.workflow_name}
                 onChange={(e) => update("workflow_name", e.target.value)}
-                placeholder={suggestedWorkflowName || "ai-demo-dev"}
+                placeholder={suggestedWorkflowName || "my-service-dev"}
               />
             </label>
           </div>
           <p className="field-hint">
-            项目标识和服务名称会根据项目名称自动生成，手动修改后将不再自动更新。工作流名称默认为「项目标识-环境名称」，如 {suggestedWorkflowName || "ai-demo-dev"}。
+            项目标识和服务名称会根据项目名称自动生成，手动修改后将不再自动更新。工作流名称默认为「服务名称-环境名称」，如 {suggestedWorkflowName || "my-service-dev"}。
           </p>
         </section>
 

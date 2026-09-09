@@ -770,7 +770,7 @@ def _validate_project_input(payload: dict[str, Any]) -> dict[str, Any]:
     if not _ENV_KEY_RE.match(environment):
         raise ValueError("环境名称需以字母开头，只能包含字母、数字、下划线和中划线")
     if not workflow_name:
-        workflow_name = f"{project_key}-{environment}"
+        workflow_name = f"{service_name}-{environment}"
     if not cluster_name:
         raise ValueError("请选择 K8s 集群")
     if not namespace:
